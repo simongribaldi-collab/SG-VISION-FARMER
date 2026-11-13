@@ -1,5 +1,13 @@
+import { ANIMAL_SPECIES } from "../data/presets.js";
 import { toggleCoopDoor } from "../engine/automation.js";
 import { esc, fmtEur, kpiCard, pill, progressBar, renderLineChartSvg } from "./components.js";
+
+function getSpeciesMeta(lot) {
+  return (
+    ANIMAL_SPECIES.find((s) => s.id === lot.speciesId) ||
+    (lot.kind === "ponte" ? ANIMAL_SPECIES[0] : ANIMAL_SPECIES[2])
+  );
+}
 
 export function renderViewLivestock(container, ctx) {
   const { state, forecast } = ctx;
@@ -13,7 +21,7 @@ export function renderViewLivestock(container, ctx) {
 
   container.innerHTML = `
     <div class="grid-4" style="margin-bottom:14px;">
-      ${kpiCard("Effectif total cheptel", totalAnimals.toLocaleString("fr-FR"), `${state.livestock.length} lots actifs`, "ok")}
+      ${kpiCard("Effectif total cheptel", totalAnimals.toLocaleString("fr-FR"), `${state.livestock.length} lots actifs (visibles en 3D)`, "ok")}
       ${kpiCard("Ponte du jour", `${totalEggsDay.toLocaleString("fr-FR")} œufs`, totalHens ? `${Math.round((totalEggsDay / totalHens) * 100)} % taux moyen` : "Aucun lot ponte", "ok")}
       ${kpiCard("Ration journalière", `${Math.round(feedDailyKg)} kg/j`, "Céréales, fourrage & compléments", "info")}
       ${kpiCard("Œufs prévus (+H)", forecast.totals.eggsCount.toLocaleString("fr-FR"), `Horizon ${forecast.horizonDays} jours`, "ok")}
@@ -22,12 +30,13 @@ export function renderViewLivestock(container, ctx) {
     <div class="grid-2" style="margin-bottom:14px;">
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">🥚 Élevage de Ponte & Poulaillers Connectés</h3>
+          <h3 class="card-title">🥚 Élevage de Ponte, Volailles & Poulaillers Connectés</h3>
           <button class="btn btn-primary btn-sm" id="btn-coop-all">🚪 Basculer Trappes</button>
         </div>
         ${layingLots.length === 0 ? `<div class="muted">Aucun lot de ponte. Ajoutez-en un ci-dessous !</div>` : ""}
         <div style="display:flex;flex-direction:column;gap:10px;">
           ${layingLots.map((l) => {
+            const sp = getSpeciesMeta(l);
             const eggs = l.eggsToday || Math.round((l.count * l.layingRatePct) / 100);
             const calS = Math.round(eggs * 0.12);
             const calM = Math.round(eggs * 0.46);
@@ -36,7 +45,7 @@ export function renderViewLivestock(container, ctx) {
             return `
               <div style="padding:11px;border-radius:11px;background:var(--bg-soft);border:1px solid var(--border);">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-                  <strong>🐔 ${esc(l.name)} (${l.count} poules · ${l.ageWeeks} sem.)</strong>
+                  <strong>${sp.icon} ${esc(l.name)} (${l.count} sujets · ${l.ageWeeks} sem.)</strong>
                   ${pill(l.doorOpen ? "Trappe OUVERTE" : "Trappe FERMÉE", l.doorOpen ? "ok" : "warn")}
                 </div>
                 <div class="grid-3" style="gap:8px;margin:8px 0;">
@@ -51,6 +60,7 @@ export function renderViewLivestock(container, ctx) {
                 <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
                   <button class="btn btn-sm" data-coop-toggle="${l.id}">🚪 ${l.doorOpen ? "Fermer trappe" : "Ouvrir trappe"}</button>
                   <button class="btn btn-primary btn-sm" data-collect-eggs="${l.id}">🧺 Collecter ${eggs} œufs</button>
+                  <button class="btn btn-danger btn-sm" data-del-lot="${l.id}">🗑️</button>
                 </div>
               </div>
             `;
@@ -60,22 +70,28 @@ export function renderViewLivestock(container, ctx) {
 
       <div class="card">
         <div class="card-header">
-          <h3 class="card-title">🐄 Élevage & Pâturage Tournant Dynamique</h3>
+          <h3 class="card-title">🐄 Élevage Multi-Espèces & Pâturage Tournant 3D</h3>
         </div>
-        ${herdLots.length === 0 ? `<div class="muted" style="margin-bottom:10px;">Aucun troupeau herbivore configuré (ajoutez-en un ou choisissez le profil Polyculture).</div>` : ""}
+        ${herdLots.length === 0 ? `<div class="muted" style="margin-bottom:10px;">Aucun troupeau herbivore configuré (ajoutez-en un ci-dessous).</div>` : ""}
         <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:12px;">
-          ${herdLots.map((h) => `
-            <div style="padding:11px;border-radius:11px;background:var(--bg-soft);border:1px solid var(--border);">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <strong>🐄 ${esc(h.name)} (${h.count} têtes)</strong>
-                ${pill(h.paddockName, "ok")}
+          ${herdLots.map((h) => {
+            const sp = getSpeciesMeta(h);
+            return `
+              <div style="padding:11px;border-radius:11px;background:var(--bg-soft);border:1px solid var(--border);">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <strong>${sp.icon} ${esc(h.name)} (${h.count} têtes · ${esc(sp.label)})</strong>
+                  ${pill(h.paddockName, "ok")}
+                </div>
+                <div class="muted" style="margin:6px 0;">
+                  Eau : ${Math.round(h.count * h.waterLitersPerDay)} L/j · Ration : ${Math.round((h.count * h.feedGramsPerDay) / 1000)} kg MS/j · Bien-être : ${h.welfarePct}%
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button class="btn btn-sm" data-rotate-paddock="${h.id}">🔄 Changer de Paddock</button>
+                  <button class="btn btn-danger btn-sm" data-del-lot="${h.id}">🗑️ Retirer</button>
+                </div>
               </div>
-              <div class="muted" style="margin:6px 0;">
-                Eau : ${Math.round(h.count * h.waterLitersPerDay)} L/j · Ration : ${Math.round((h.count * h.feedGramsPerDay) / 1000)} kg MS/j · Bien-être : ${h.welfarePct}%
-              </div>
-              <button class="btn btn-sm" data-rotate-paddock="${h.id}">🔄 Changer de Paddock</button>
-            </div>
-          `).join("")}
+            `;
+          }).join("")}
         </div>
 
         <h4 style="margin:8px 0;">📈 Prévision de ponte (horizon ${forecast.horizonDays} j)</h4>
@@ -88,29 +104,28 @@ export function renderViewLivestock(container, ctx) {
 
     <div class="card">
       <div class="card-header">
-        <h3 class="card-title">➕ Ajouter un Lot Animal (Ponte ou Élevage)</h3>
+        <h3 class="card-title">➕ Ajouter une Espèce Animale au Cheptel (Modélisée dans le Jumeau 3D)</h3>
       </div>
       <form id="form-add-livestock" class="form-row">
-        <label class="field" style="flex:1;min-width:170px;">
-          Nom du lot
-          <input class="input" name="name" placeholder="Ex: Lot B Poules Marans" required />
+        <label class="field" style="flex:1;min-width:190px;">
+          Nom du lot / troupeau
+          <input class="input" name="name" placeholder="Ex: Troupeau Chèvres Alpines / Lot Poules Marans" required />
         </label>
-        <label class="field" style="width:140px;">
-          Atelier
-          <select class="input" name="kind">
-            <option value="ponte">Ponte (Poules)</option>
-            <option value="elevage">Élevage (Ovins/Bovins)</option>
+        <label class="field" style="width:230px;">
+          Espèce (apparence 3D dédiée)
+          <select class="input" name="speciesId">
+            ${ANIMAL_SPECIES.map((s) => `<option value="${s.id}">${s.icon} ${esc(s.label)}</option>`).join("")}
           </select>
         </label>
-        <label class="field" style="width:100px;">
+        <label class="field" style="width:105px;">
           Effectif
-          <input class="input" type="number" name="count" value="120" min="1" required />
+          <input class="input" type="number" name="count" value="25" min="1" required />
         </label>
-        <label class="field" style="width:110px;">
+        <label class="field" style="width:115px;">
           Taux ponte %
           <input class="input" type="number" name="layingRatePct" value="88" min="0" max="100" />
         </label>
-        <button class="btn btn-primary" type="submit">Ajouter au cheptel</button>
+        <button class="btn btn-primary" type="submit">Ajouter au cheptel & 3D</button>
       </form>
     </div>
   `;
@@ -173,31 +188,45 @@ export function renderViewLivestock(container, ctx) {
     });
   });
 
+  container.querySelectorAll("[data-del-lot]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.livestock = state.livestock.filter((l) => l.id !== btn.dataset.delLot);
+      ctx.toast("Lot retiré du cheptel.");
+      ctx.save();
+      ctx.rerender();
+    });
+  });
+
   container.querySelector("#form-add-livestock").addEventListener("submit", (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
-    const kind = fd.get("kind");
-    const count = Number(fd.get("count")) || 50;
-    const rate = Number(fd.get("layingRatePct")) || 85;
+    const speciesId = fd.get("speciesId") || "bovin_lait";
+    const sp = ANIMAL_SPECIES.find((s) => s.id === speciesId) || ANIMAL_SPECIES[0];
+    const isPonte = speciesId === "ponte" || speciesId === "canard";
+    const kind = isPonte ? "ponte" : "elevage";
+    const count = Number(fd.get("count")) || 20;
+    const rate = Number(fd.get("layingRatePct")) || (speciesId === "canard" ? 45 : 85);
+
     state.livestock.push({
       id: `LOT-${Date.now()}`,
       kind,
+      speciesId,
       name: fd.get("name"),
-      species: kind === "ponte" ? "Poules pondeuses" : "Ovins / Bovins",
+      species: sp.label,
       count,
-      ageWeeks: 26,
-      layingRatePct: kind === "ponte" ? rate : 0,
-      eggsToday: kind === "ponte" ? Math.round((count * rate) / 100) : 0,
+      ageWeeks: 28,
+      layingRatePct: isPonte ? rate : 0,
+      eggsToday: isPonte ? Math.round((count * rate) / 100) : 0,
       eggPriceUnit: 0.38,
-      feedGramsPerDay: kind === "ponte" ? 120 : 2800,
-      waterLitersPerDay: kind === "ponte" ? 0.25 : 8,
+      feedGramsPerDay: sp.feedG,
+      waterLitersPerDay: sp.waterL,
       welfarePct: 95,
       doorOpen: true,
-      lightSchedule: kind === "ponte" ? "06:00 - 20:30" : "Naturel",
+      lightSchedule: isPonte ? "06:00 - 20:30" : "Naturel",
       paddockName: "Parcours Paddock A",
-      parasiteRiskPct: 8,
+      parasiteRiskPct: 7,
     });
-    ctx.toast("Nouveau lot animal ajouté !");
+    ctx.toast(`${sp.icon} ${sp.label} ajouté au cheptel et visible en 3D !`);
     ctx.save();
     ctx.rerender();
   });

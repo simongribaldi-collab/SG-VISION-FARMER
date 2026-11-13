@@ -1,7 +1,7 @@
-import { BUILDING_CATALOG, buildPresetState, SCALE_PRESETS } from "./data/presets.js";
+import { BUILDING_CATALOG, buildPresetState, generateTerrainHeights, SCALE_PRESETS } from "./data/presets.js";
 import { askAssistant } from "./engine/aiAssistant.js";
 import { dispatchRobot, setGreenhouseVent, tickRobots, toggleCoopDoor, toggleIrrigation } from "./engine/automation.js";
-import { Farm3DEngine } from "./engine/engine3d.js";
+import { Farm3DEngine, sculptTerrainAt } from "./engine/engine3d.js";
 import { simulateFuture } from "./engine/predictor.js";
 import { esc, fmtEur, pill } from "./ui/components.js";
 import { renderView3D } from "./ui/view3d.js";
@@ -12,7 +12,7 @@ import { renderViewLivestock } from "./ui/viewLivestock.js";
 import { renderViewResources } from "./ui/viewResources.js";
 import { renderViewRobotics } from "./ui/viewRobotics.js";
 
-const STORAGE_KEY = "sg_vision_farmer_state_v1";
+const STORAGE_KEY = "sg_vision_farmer_state_v2";
 const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("sg_farmer_sync") : null;
 
 const TABS = [
@@ -40,8 +40,15 @@ class AppController {
       overlay: "normal",
       showArPins: false,
       buildActive: false,
+      buildCategory: "all",
       buildType: "bed_open",
       buildRot: 0,
+      sculptActive: false,
+      sculptTool: "raise",
+      sculptRadius: 5,
+      scannerOpen: false,
+      demoScanId: "coteau_ferme",
+      lastScanResult: null,
       selectedObject: null,
       agroTab: "plots",
       rotPlotId: null,
@@ -89,10 +96,19 @@ class AppController {
   }
 
   async loadInitialState() {
+    const ensureV2 = (st) => {
+      if (!st || !st.farm) return null;
+      if (!st.terrain || !Array.isArray(st.terrain.heights)) {
+        // Migration automatique V1 -> V2 avec relief, corps de ferme, haies, chemins, riviere et multi-especes
+        return buildPresetState(st.farm.presetId || "maraichage_serre");
+      }
+      return st;
+    };
+
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
       if (r.ok) {
-        const data = await r.json();
+        const data = ensureV2(await r.json());
         if (data && data.farm) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
           return data;
@@ -103,7 +119,7 @@ class AppController {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = ensureV2(JSON.parse(raw));
         if (parsed && parsed.farm) return parsed;
       }
     } catch {}
@@ -369,15 +385,20 @@ class AppController {
 
   mountCanvas(canvas, onSelect) {
     if (!canvas) return;
+    const onSculptTerrain = (wx, wz) => {
+      sculptTerrainAt(this.state, wx, wz, this.uiState.sculptTool || "raise", this.uiState.sculptRadius || 5);
+    };
     if (!this.engine3d || this.engine3d.canvas !== canvas) {
       const prevCam = this.engine3d?.camera;
       this.engine3d = new Farm3DEngine(canvas, {
         onSelect,
         onPlaceBuilding: (placement) => this.placeBuilding3D(placement),
+        onSculptTerrain,
       });
       if (prevCam) this.engine3d.camera = prevCam;
     } else {
       this.engine3d.callbacks.onSelect = onSelect;
+      this.engine3d.callbacks.onSculptTerrain = onSculptTerrain;
     }
   }
 
@@ -385,8 +406,8 @@ class AppController {
     const cat = BUILDING_CATALOG.find((b) => b.type === type);
     if (!cat) return;
 
-    if (type === "bed_open" || type === "greenhouse") {
-      const isGh = type === "greenhouse";
+    if (type === "bed_open" || type === "greenhouse" || type === "glass_house") {
+      const isGh = type === "greenhouse" || type === "glass_house";
       const id = `${isGh ? "S" : "P"}${this.state.plots.length + 1}`;
       this.state.plots.push({
         id,

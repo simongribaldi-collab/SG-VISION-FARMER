@@ -1,15 +1,26 @@
 /**
- * Base de connaissances agronomiques, catalogues 3D, profils climatiques
- * et générateurs d'exploitations multi-échelles pour SG Vision Farmer.
+ * Base de connaissances agronomiques, catalogues 3D etendus (corps de ferme, haies,
+ * chemins, rivieres, cultures realistes, especes animales) et generateurs de relief.
  */
 
 export const ACTIVITY_DEFS = [
   { id: "maraichage_champ", label: "Maraîchage plein champ", icon: "🥕" },
   { id: "serre", label: "Serres & Tunnels", icon: "🏡" },
-  { id: "elevage", label: "Élevage (herbivores / plein air)", icon: "🐄" },
-  { id: "ponte", label: "Élevage de ponte (poules)", icon: "🥚" },
-  { id: "agroforesterie", label: "Verger & Agroforesterie", icon: "🌳" },
+  { id: "elevage", label: "Élevage (bovins, ovins, caprins, porcins)", icon: "🐄" },
+  { id: "ponte", label: "Élevage de ponte & volailles", icon: "🥚" },
+  { id: "agroforesterie", label: "Verger, Haies & Agroforesterie", icon: "🌳" },
   { id: "energie", label: "Autonomie Énergie & Eau", icon: "⚡" },
+];
+
+export const ANIMAL_SPECIES = [
+  { id: "ponte", label: "Poules pondeuses & Coqs", icon: "🐔", kind: "ponte", defaultFeedG: 122, defaultWaterL: 0.26 },
+  { id: "canard", label: "Canards coureurs (Anti-limaces)", icon: "🦆", kind: "ponte", defaultFeedG: 140, defaultWaterL: 0.6 },
+  { id: "bovin_lait", label: "Vaches laitières (Pie Noir)", icon: "🐄", kind: "elevage", defaultFeedG: 16500, defaultWaterL: 75 },
+  { id: "bovin_viande", label: "Bovins allaitants (Charolais/Limousin)", icon: "🐂", kind: "elevage", defaultFeedG: 13500, defaultWaterL: 55 },
+  { id: "ovin", label: "Moutons / Brebis", icon: "🐑", kind: "elevage", defaultFeedG: 2200, defaultWaterL: 6 },
+  { id: "caprin", label: "Chèvres laitières", icon: "🐐", kind: "elevage", defaultFeedG: 2400, defaultWaterL: 7 },
+  { id: "porcin", label: "Cochons plein air", icon: "🐖", kind: "elevage", defaultFeedG: 3100, defaultWaterL: 12 },
+  { id: "equin", label: "Chevaux de trait / Ânes", icon: "🐎", kind: "elevage", defaultFeedG: 9500, defaultWaterL: 40 },
 ];
 
 export const CLIMATE_LOCATIONS = [
@@ -92,6 +103,7 @@ export const CROP_CATALOG = [
     id: "tomate",
     name: "Tomate Cœur / Grappe",
     family: "Solanacées",
+    shape: "staked_fruit",
     icon: "🍅",
     color: "#ef4444",
     baseTemp: 10,
@@ -114,8 +126,9 @@ export const CROP_CATALOG = [
   },
   {
     id: "laitue",
-    name: "Laitue / Mesclun",
+    name: "Laitue / Batavia",
     family: "Astéracées",
+    shape: "leafy_head",
     icon: "🥬",
     color: "#84cc16",
     baseTemp: 4,
@@ -140,6 +153,7 @@ export const CROP_CATALOG = [
     id: "carotte",
     name: "Carotte de garde",
     family: "Apiacées",
+    shape: "root_top",
     icon: "🥕",
     color: "#f97316",
     baseTemp: 5,
@@ -164,6 +178,7 @@ export const CROP_CATALOG = [
     id: "poireau",
     name: "Poireau d'hiver",
     family: "Alliacées",
+    shape: "allium",
     icon: "🧅",
     color: "#10b981",
     baseTemp: 4,
@@ -188,6 +203,7 @@ export const CROP_CATALOG = [
     id: "courgette",
     name: "Courgette verte",
     family: "Cucurbitacées",
+    shape: "sprawling_squash",
     icon: "🥒",
     color: "#22c55e",
     baseTemp: 10,
@@ -212,6 +228,7 @@ export const CROP_CATALOG = [
     id: "haricot",
     name: "Haricot vert filet",
     family: "Fabacées",
+    shape: "bush_pods",
     icon: "🫛",
     color: "#16a34a",
     baseTemp: 10,
@@ -236,6 +253,7 @@ export const CROP_CATALOG = [
     id: "chou",
     name: "Chou pommé / Brocoli",
     family: "Brassicacées",
+    shape: "leafy_head",
     icon: "🥦",
     color: "#15803d",
     baseTemp: 5,
@@ -260,6 +278,7 @@ export const CROP_CATALOG = [
     id: "oignon",
     name: "Oignon jaune / rouge",
     family: "Alliacées",
+    shape: "allium",
     icon: "🧄",
     color: "#d97706",
     baseTemp: 5,
@@ -284,6 +303,7 @@ export const CROP_CATALOG = [
     id: "epinard",
     name: "Épinard d'automne/printemps",
     family: "Amaranthacées",
+    shape: "leafy_head",
     icon: "🌿",
     color: "#059669",
     baseTemp: 3,
@@ -308,6 +328,7 @@ export const CROP_CATALOG = [
     id: "radis",
     name: "Radis botte express",
     family: "Brassicacées",
+    shape: "root_top",
     icon: "🥗",
     color: "#f43f5e",
     baseTemp: 4,
@@ -332,6 +353,7 @@ export const CROP_CATALOG = [
     id: "pomme_de_terre",
     name: "Pomme de terre primeur/garde",
     family: "Solanacées",
+    shape: "bush_pods",
     icon: "🥔",
     color: "#ca8a04",
     baseTemp: 7,
@@ -354,8 +376,9 @@ export const CROP_CATALOG = [
   },
   {
     id: "fraise",
-    name: "Fraise remontante",
+    name: "Fraise remontante sur butte",
     family: "Rosacées",
+    shape: "berry_mound",
     icon: "🍓",
     color: "#e11d48",
     baseTemp: 6,
@@ -380,6 +403,7 @@ export const CROP_CATALOG = [
     id: "ble",
     name: "Blé tendre panifiable / fourrager",
     family: "Poacées",
+    shape: "wheat_golden",
     icon: "🌾",
     color: "#eab308",
     baseTemp: 4,
@@ -404,6 +428,7 @@ export const CROP_CATALOG = [
     id: "mais",
     name: "Maïs grain / ensilage",
     family: "Poacées",
+    shape: "tall_corn",
     icon: "🌽",
     color: "#facc15",
     baseTemp: 8,
@@ -425,9 +450,60 @@ export const CROP_CATALOG = [
     nitrogenNeed: "Elevé",
   },
   {
+    id: "tournesol",
+    name: "Tournesol oléagineux",
+    family: "Astéracées",
+    shape: "sunflower",
+    icon: "🌻",
+    color: "#fbbf24",
+    baseTemp: 7,
+    gddTarget: 1450,
+    daysToHarvest: 125,
+    nurseryDays: 0,
+    kc: 0.9,
+    seedsPerM2: 7,
+    seedCostPerM2: 0.05,
+    laborHoursPer100m2: 0.18,
+    yieldKgPerM2: 0.36,
+    pricePerKg: 0.48,
+    heightM: 1.85,
+    greenhouseCompatible: false,
+    openFieldCompatible: true,
+    diseases: ["botrytis"],
+    goodCompanions: ["mais", "haricot", "engrais_vert"],
+    badCompanions: ["pomme_de_terre"],
+    nitrogenNeed: "Faible",
+  },
+  {
+    id: "vigne",
+    name: "Vigne / Raisin de table & cuve",
+    family: "Vitacées",
+    shape: "trellis_vine",
+    icon: "🍇",
+    color: "#7c3aed",
+    baseTemp: 10,
+    gddTarget: 1400,
+    daysToHarvest: 150,
+    nurseryDays: 0,
+    kc: 0.75,
+    seedsPerM2: 0.5,
+    seedCostPerM2: 0.8,
+    laborHoursPer100m2: 4.5,
+    yieldKgPerM2: 1.2,
+    pricePerKg: 3.4,
+    heightM: 1.6,
+    greenhouseCompatible: false,
+    openFieldCompatible: true,
+    diseases: ["mildiou", "oidium", "botrytis"],
+    goodCompanions: ["engrais_vert"],
+    badCompanions: ["chou"],
+    nitrogenNeed: "Faible",
+  },
+  {
     id: "luzerne",
     name: "Luzerne / Prairie multi-espèces",
     family: "Fabacées",
+    shape: "meadow_clover",
     icon: "🍀",
     color: "#22c55e",
     baseTemp: 5,
@@ -452,6 +528,7 @@ export const CROP_CATALOG = [
     id: "engrais_vert",
     name: "Engrais vert (Phacélie + Trèfle)",
     family: "Couvert / Fabacées",
+    shape: "purple_flowers",
     icon: "🐝",
     color: "#a855f7",
     baseTemp: 4,
@@ -478,7 +555,7 @@ export const DISEASE_CATALOG = [
   {
     id: "mildiou",
     name: "Mildiou (Phytophthora)",
-    target: "Solanacées, Alliacées, Épinard",
+    target: "Solanacées, Alliacées, Vigne, Épinard",
     tempMin: 13,
     tempMax: 25,
     rhMin: 82,
@@ -488,7 +565,7 @@ export const DISEASE_CATALOG = [
   {
     id: "oidium",
     name: "Oïdium (Blanc)",
-    target: "Cucurbitacées, Fraise, Blé",
+    target: "Cucurbitacées, Fraise, Vigne, Blé",
     tempMin: 18,
     tempMax: 30,
     rhMin: 55,
@@ -498,11 +575,11 @@ export const DISEASE_CATALOG = [
   {
     id: "botrytis",
     name: "Botrytis (Pourriture grise)",
-    target: "Tomate, Fraise, Laitue, Haricot",
+    target: "Tomate, Fraise, Laitue, Haricot, Tournesol",
     tempMin: 11,
     tempMax: 22,
     rhMin: 85,
-    symptoms: "Moississure grise duveteuse sur collets, fruits ou blessures de taille.",
+    symptoms: "Moisissure grise duveteuse sur collets, fruits ou blessures de taille.",
     biocontrol: "Déshumidification nocturne serre (ouvrants), espacement des plants, Bacillus amyloliquefaciens.",
   },
   {
@@ -543,7 +620,7 @@ export const DISEASE_CATALOG = [
     tempMax: 20,
     rhMin: 80,
     symptoms: "Jeunes plants sectionnés la nuit, traces de mucus brillant.",
-    biocontrol: "Phosphate ferrique bio, nématodes Phasmarhabditis, passage nocturne ou canards coureurs indiens.",
+    biocontrol: "Parcours de canards coureurs indiens, phosphate ferrique bio, nématodes Phasmarhabditis.",
   },
   {
     id: "pou_rouge",
@@ -553,27 +630,90 @@ export const DISEASE_CATALOG = [
     tempMax: 35,
     rhMin: 55,
     symptoms: "Chute du taux de ponte, poules nerveuses le soir, amas gris/rouges sous perchoirs.",
-    biocontrol: "Terre de diatomée amorphe dans les bains de poussière et interstices, nettoyage haute température, prédateurs Androlis.",
+    biocontrol: "Terre de diatomée amorphe dans les bains de poussière et interstices, nettoyage vapeur, prédateurs Androlis.",
   },
 ];
 
 export const BUILDING_CATALOG = [
-  { type: "bed_open", label: "Planche Plein Champ", icon: "🥬", w: 6, d: 2, h: 0.4, color: "#5c4033", category: "culture", cost: 220 },
-  { type: "greenhouse", label: "Serre Tunnel / Chapelle", icon: "🏡", w: 8, d: 4, h: 3.1, color: "#7dd3fc", category: "culture", cost: 4800 },
-  { type: "paddock", label: "Paddock Pâturage", icon: "🌿", w: 10, d: 8, h: 0.25, color: "#4ade80", category: "elevage", cost: 650 },
-  { type: "coop_mobile", label: "Poulailler Mobile", icon: "🐔", w: 3.5, d: 2.5, h: 2.0, color: "#f59e0b", category: "ponte", cost: 3400 },
-  { type: "coop_fixed", label: "Bâtiment Ponte Fixe", icon: "🥚", w: 7, d: 4, h: 2.8, color: "#fb923c", category: "ponte", cost: 14500 },
-  { type: "barn_livestock", label: "Étable / Bergerie", icon: "🐄", w: 9, d: 5, h: 3.6, color: "#94a3b8", category: "elevage", cost: 18000 },
-  { type: "hangar", label: "Hangar Matériel / Froid", icon: "🏭", w: 7, d: 5, h: 3.8, color: "#64748b", category: "infra", cost: 12000 },
-  { type: "water_tank", label: "Cuve / Château d'Eau", icon: "💧", w: 2.6, d: 2.6, h: 3.0, color: "#0ea5e9", category: "ressource", cost: 2800 },
-  { type: "pond", label: "Bassin Rétention Eau", icon: "🌊", w: 6, d: 5, h: 0.3, color: "#0284c7", category: "ressource", cost: 5200 },
-  { type: "solar_array", label: "Ombrière / Solaire PV", icon: "☀️", w: 5, d: 3, h: 1.8, color: "#1e3a8a", category: "energie", cost: 4500 },
-  { type: "wind_turbine", label: "Éolienne Agricole", icon: "🌬️", w: 2, d: 2, h: 7.5, color: "#e2e8f0", category: "energie", cost: 6900 },
+  // Corps de ferme & Batiments
+  { type: "farmhouse_courtyard", label: "Corps de Ferme en U (Pierre)", icon: "🏰", w: 11, d: 9, h: 4.8, color: "#d6c5b3", category: "corps_ferme", cost: 45000 },
+  { type: "farm_house", label: "Maison de Ferme / Habitation", icon: "🏡", w: 7.5, d: 5.5, h: 4.5, color: "#dfd3c3", category: "corps_ferme", cost: 28000 },
+  { type: "stone_barn", label: "Grange Ancienne en Pierre", icon: "🏚️", w: 9, d: 5.5, h: 4.6, color: "#b8a99a", category: "corps_ferme", cost: 22000 },
+  { type: "farm_shop", label: "Boutique Vente à la Ferme", icon: "🏪", w: 5.5, d: 4, h: 3.2, color: "#fcd34d", category: "corps_ferme", cost: 8500 },
+  { type: "hangar", label: "Hangar Matériel & Chambre Froide", icon: "🏭", w: 8, d: 5.5, h: 4.0, color: "#64748b", category: "corps_ferme", cost: 12000 },
+  { type: "grain_silo", label: "Silo à Grains Métallique", icon: "🛢️", w: 3.2, d: 3.2, h: 6.8, color: "#cbd5e1", category: "corps_ferme", cost: 7200 },
+
+  // Cultures & Serres
+  { type: "bed_open", label: "Planche Plein Champ", icon: "🥬", w: 7, d: 2.2, h: 0.4, color: "#5c4033", category: "culture", cost: 220 },
+  { type: "greenhouse", label: "Serre Tunnel / Chapelle", icon: "⛺", w: 8.5, d: 4.2, h: 3.1, color: "#7dd3fc", category: "culture", cost: 4800 },
+  { type: "glass_house", label: "Serre Verre Multi-Chapelles", icon: "🪟", w: 10, d: 7, h: 3.8, color: "#bae6fd", category: "culture", cost: 16500 },
+
+  // Elevage & Ponte
+  { type: "paddock", label: "Paddock Pâturage (Clôturé)", icon: "🌿", w: 10, d: 7, h: 0.25, color: "#4ade80", category: "elevage", cost: 650 },
+  { type: "barn_livestock", label: "Étable / Bergerie Bois-Pierre", icon: "🐄", w: 9, d: 5.5, h: 3.8, color: "#94a3b8", category: "elevage", cost: 18000 },
+  { type: "coop_mobile", label: "Poulailler Mobile Plein Air", icon: "🐔", w: 3.8, d: 2.6, h: 2.1, color: "#f59e0b", category: "ponte", cost: 3400 },
+  { type: "coop_fixed", label: "Bâtiment Ponte Automatisé", icon: "🥚", w: 7.5, d: 4.2, h: 3.0, color: "#fb923c", category: "ponte", cost: 14500 },
+
+  // Chemins, Haies, Riviere & Paysage
+  { type: "hedge_row", label: "Haie Bocagère (6m)", icon: "🌳", w: 6, d: 1.4, h: 2.8, color: "#15803d", category: "paysage", cost: 190 },
+  { type: "hedge_tree", label: "Arbre Fruitier / Agroforesterie", icon: "🍎", w: 2.4, d: 2.4, h: 4.2, color: "#16a34a", category: "paysage", cost: 180 },
+  { type: "path_dirt", label: "Chemin d'Exploitation (Terre/Gravier)", icon: "🛤️", w: 6, d: 2.2, h: 0.08, color: "#c2a878", category: "paysage", cost: 120 },
+  { type: "road_paved", label: "Route / Cour Empierrée", icon: "🛣️", w: 6, d: 2.8, h: 0.1, color: "#64748b", category: "paysage", cost: 260 },
+  { type: "stone_wall", label: "Muret en Pierre Sèche", icon: "🧱", w: 6, d: 0.7, h: 1.1, color: "#a8a29e", category: "paysage", cost: 310 },
+  { type: "river_seg", label: "Tronçon Rivière / Ruisseau", icon: "🏞️", w: 7, d: 3.2, h: 0.15, color: "#0284c7", category: "paysage", cost: 0 },
+  { type: "bridge", label: "Pont en Pierre & Bois", icon: "🌉", w: 4.2, d: 3.8, h: 1.3, color: "#a1887f", category: "paysage", cost: 1800 },
+
+  // Eau, Energie & Capteurs
+  { type: "pond", label: "Bassin / Mare Naturelle", icon: "🌊", w: 6.5, d: 5, h: 0.3, color: "#0284c7", category: "ressource", cost: 5200 },
+  { type: "water_tank", label: "Cuve / Château d'Eau", icon: "💧", w: 2.8, d: 2.8, h: 3.2, color: "#0ea5e9", category: "ressource", cost: 2800 },
+  { type: "well_pump", label: "Puits / Forage Connecté", icon: "⛲", w: 1.8, d: 1.8, h: 2.2, color: "#78716c", category: "ressource", cost: 3100 },
+  { type: "solar_array", label: "Ombrière / Solaire PV", icon: "☀️", w: 5.5, d: 3.2, h: 2.0, color: "#1e3a8a", category: "energie", cost: 4500 },
+  { type: "wind_turbine", label: "Éolienne Agricole", icon: "🌬️", w: 2, d: 2, h: 7.8, color: "#e2e8f0", category: "energie", cost: 6900 },
   { type: "weather_station", label: "Station Météo IoT", icon: "🌦️", w: 1.5, d: 1.5, h: 3.6, color: "#38bdf8", category: "capteur", cost: 890 },
-  { type: "compost", label: "Aire de Compostage", icon: "♻️", w: 4, d: 3, h: 1.0, color: "#78350f", category: "infra", cost: 450 },
-  { type: "apiary", label: "Rucher Pollinisation", icon: "🐝", w: 3, d: 2, h: 1.0, color: "#facc15", category: "agro", cost: 950 },
-  { type: "hedge_tree", label: "Haie / Arbre Fruitier", icon: "🌳", w: 2, d: 2, h: 4.0, color: "#15803d", category: "agro", cost: 180 },
+  { type: "compost", label: "Plateforme Compostage", icon: "♻️", w: 4, d: 3, h: 1.1, color: "#78350f", category: "infra", cost: 450 },
+  { type: "apiary", label: "Rucher Pollinisation (4 ruches)", icon: "🐝", w: 3.2, d: 2, h: 1.1, color: "#facc15", category: "agro", cost: 950 },
 ];
+
+export const TERRAIN_PRESETS = [
+  { id: "valley_river", label: "🏞️ Vallon & Rivière (Réaliste)" },
+  { id: "hillside", label: "⛰️ Coteau & Terrasses (Drôme/Ardèche)" },
+  { id: "bocage_rolling", label: "🌳 Collines Douces du Bocage" },
+  { id: "flat_plain", label: "🌾 Plaine Régulière" },
+];
+
+export function generateTerrainHeights(presetId = "valley_river", res = 32) {
+  const heights = [];
+  for (let gz = 0; gz <= res; gz++) {
+    for (let gx = 0; gx <= res; gx++) {
+      const nx = (gx / res) * 2 - 1; // -1..1
+      const nz = (gz / res) * 2 - 1;
+      let h = 0;
+
+      if (presetId === "hillside") {
+        // Coteau montant vers le nord-ouest + replat central pour le corps de ferme
+        h = (-nz * 2.2 - nx * 0.9) + Math.sin(nx * 3.2) * 0.35;
+        if (Math.hypot(nx, nz) < 0.45) h *= 0.35;
+      } else if (presetId === "bocage_rolling") {
+        h = Math.sin(nx * 2.8) * Math.cos(nz * 2.4) * 1.35 + Math.sin((nx + nz) * 4.2) * 0.3;
+        if (Math.hypot(nx, nz) < 0.4) h *= 0.3;
+      } else if (presetId === "valley_river") {
+        // Collines douces sur les bords et lit de riviere au sud-est
+        const distCenter = Math.hypot(nx * 0.8, nz * 0.8);
+        h = Math.max(0, (distCenter - 0.38) * 2.4) + Math.sin(nx * 3.0) * 0.25;
+        // Sillon de riviere vers z > 0.45
+        const riverLine = 0.58 + Math.sin(nx * 2.2) * 0.12;
+        const dRiver = Math.abs(nz - riverLine);
+        if (dRiver < 0.16) {
+          h -= (0.16 - dRiver) * 3.5;
+        }
+      } else {
+        h = Math.sin(nx * 2) * Math.cos(nz * 2) * 0.12;
+      }
+      heights.push(Number(h.toFixed(2)));
+    }
+  }
+  return { res, heights, presetId };
+}
 
 export const TROPHIES_DEF = [
   { id: "water_saver", icon: "💧", title: "Gardien de l'Eau", desc: "Maintenir la réserve d'eau au-dessus de 65 % avec irrigation auto." },
@@ -585,11 +725,11 @@ export const TROPHIES_DEF = [
 ];
 
 export const SCALE_PRESETS = [
-  { id: "micro", label: "Micro-Ferme Bio-Intensive (0,4 ha)", desc: "Planches permanentes 80cm, 2 tunnels, 60 poules mobiles, rover désherbeur, solaire 6 kWc." },
-  { id: "maraichage_serre", label: "Maraîchage & Serres High-Tech (3,5 ha)", desc: "Plein champ + serres chapelles automatisées, drone NDVI, 2 rovers, bassin 450 m³." },
-  { id: "polyculture", label: "Polyculture, Élevage & Ponte (28 ha)", desc: "Grandes cultures, pâturage tournant dynamique, 1 200 poules pondeuses, troupeau bovin, tracteur RTK." },
-  { id: "grande", label: "Grande Exploitation Connectée (140 ha)", desc: "Îlots grandes cultures + légumier plein champ, flotte autonome RTK, silos, équipe 6 personnes." },
-  { id: "sandbox", label: "Ferme Vierge (Bac à Sable 3D)", desc: "Terrain prêt à être entièrement dessiné et aménagé en 3D." },
+  { id: "micro", label: "Micro-Ferme Bio-Intensive (0,4 ha)", desc: "Corps de ferme pierre, planches 80cm, tunnels, poules & canards coureurs, rivière & haies." },
+  { id: "maraichage_serre", label: "Domaine Maraîchage, Serres & Élevage (3,5 ha)", desc: "Corps de ferme en U, plein champ, serres chapelles, rivière avec pont, vaches, moutons & poules." },
+  { id: "polyculture", label: "Polyculture, Élevage & Ponte du Bocage (28 ha)", desc: "Grand corps de ferme, grange pierre, silos, vaches laitières, brebis, cochons plein air & 1 200 poules." },
+  { id: "grande", label: "Grande Exploitation Connectée (140 ha)", desc: "Blé, maïs, tournesol, vigne, silos, flotte RTK autonome, centrale agrivoltaïque & éolienne." },
+  { id: "sandbox", label: "Terrain Vierge / Mode Scan Vidéo 3D", desc: "Terrain prêt à être sculpté ou généré en filmant votre ferme." },
 ];
 
 function makeHistory(prev1, prev2) {
@@ -606,181 +746,173 @@ export function buildPresetState(presetId = "maraichage_serre") {
   const isSandbox = presetId === "sandbox";
 
   const scaleMeta = {
-    micro: { scale: "micro", areaHa: 0.4, gridSize: 28, name: "La Micro-Ferme des Sources", locationId: "drome" },
-    maraichage_serre: { scale: "moyenne", areaHa: 3.5, gridSize: 36, name: "Domaine Val-Soleil & Serres", locationId: "drome" },
-    polyculture: { scale: "moyenne_grande", areaHa: 28, gridSize: 44, name: "Ferme Polyculture du Bocage", locationId: "bretagne" },
-    grande: { scale: "grande", areaHa: 140, gridSize: 52, name: "Exploitation Connectée Beauce-Horizon", locationId: "beauce" },
-    sandbox: { scale: "moyenne", areaHa: 2.0, gridSize: 36, name: "Nouvelle Ferme 3D", locationId: "drome" },
-  }[presetId] || { scale: "moyenne", areaHa: 3.5, gridSize: 36, name: "Domaine Val-Soleil & Serres", locationId: "drome" };
+    micro: { scale: "micro", areaHa: 0.4, gridSize: 38, name: "La Micro-Ferme des Sources", locationId: "drome", terrainPreset: "hillside" },
+    maraichage_serre: { scale: "moyenne", areaHa: 3.5, gridSize: 44, name: "Domaine Val-Soleil & Corps de Ferme", locationId: "drome", terrainPreset: "valley_river" },
+    polyculture: { scale: "moyenne_grande", areaHa: 28, gridSize: 48, name: "Ferme du Bocage & Élevage", locationId: "bretagne", terrainPreset: "bocage_rolling" },
+    grande: { scale: "grande", areaHa: 140, gridSize: 54, name: "Exploitation Connectée Beauce-Horizon", locationId: "beauce", terrainPreset: "flat_plain" },
+    sandbox: { scale: "moyenne", areaHa: 2.0, gridSize: 44, name: "Ferme 3D Personnalisée", locationId: "drome", terrainPreset: "valley_river" },
+  }[presetId] || { scale: "moyenne", areaHa: 3.5, gridSize: 44, name: "Domaine Val-Soleil & Corps de Ferme", locationId: "drome", terrainPreset: "valley_river" };
 
   const loc = CLIMATE_LOCATIONS.find((l) => l.id === scaleMeta.locationId) || CLIMATE_LOCATIONS[0];
+  const terrain = generateTerrainHeights(scaleMeta.terrainPreset, 32);
 
-  const activities = isSandbox
-    ? ["maraichage_champ", "serre", "ponte", "elevage", "energie"]
-    : isMicro
-      ? ["maraichage_champ", "serre", "ponte", "agroforesterie", "energie"]
-      : isPoly
-        ? ["maraichage_champ", "elevage", "ponte", "agroforesterie", "energie"]
-        : isLarge
-          ? ["maraichage_champ", "serre", "elevage", "energie"]
-          : ["maraichage_champ", "serre", "ponte", "agroforesterie", "energie"];
+  const activities = ["maraichage_champ", "serre", "ponte", "elevage", "agroforesterie", "energie"];
 
   const plots = isSandbox ? [] : [
     {
       id: "P1",
       name: isLarge ? "Îlot Nord 1 — Blé Tendre" : "Planche P1 — Carottes",
       zone: "Plein champ",
-      x: -10, z: -8, w: 7, d: 2.2, rot: 0,
+      x: -11, z: -6.5, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 350000 : isMicro ? 24 : 180,
       soilType: "Limono-argileux",
-      ph: 6.7,
-      omPct: 4.2,
+      ph: 6.7, omPct: 4.2,
       cropId: isLarge ? "ble" : "carotte",
-      plantedDayOffset: -36,
-      gddAccumulated: 520,
-      stage: "Croissance",
-      moisturePct: 58,
-      healthPct: 91,
-      diseaseRisk: 14,
+      plantedDayOffset: -36, gddAccumulated: 520,
+      stage: "Croissance", moisturePct: 58, healthPct: 91, diseaseRisk: 14,
       irrigationValveOpen: false,
       history: makeHistory("laitue", "haricot"),
     },
     {
       id: "P2",
-      name: isLarge ? "Îlot Sud 2 — Maïs Grain" : "Planche P2 — Laitues",
+      name: isLarge ? "Îlot Sud 2 — Maïs Grain" : "Planche P2 — Maïs Doux & Courges",
       zone: "Plein champ",
-      x: -10, z: -3.5, w: 7, d: 2.2, rot: 0,
+      x: -11, z: -3.2, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 420000 : isMicro ? 24 : 160,
       soilType: "Limoneux",
-      ph: 6.5,
-      omPct: 3.9,
-      cropId: isLarge ? "mais" : "laitue",
-      plantedDayOffset: -22,
-      gddAccumulated: 320,
-      stage: "Croissance",
-      moisturePct: 34,
-      healthPct: 86,
-      diseaseRisk: 22,
+      ph: 6.5, omPct: 3.9,
+      cropId: "mais",
+      plantedDayOffset: -42, gddAccumulated: 890,
+      stage: "Croissance haute", moisturePct: 36, healthPct: 89, diseaseRisk: 18,
       irrigationValveOpen: false,
       history: makeHistory("poireau", "courgette"),
     },
     {
       id: "P3",
-      name: "Planche P3 — Poireaux & Compagnons",
+      name: isLarge ? "Îlot Est 3 — Tournesol" : "Planche P3 — Tournesols & Mellifères",
       zone: "Plein champ",
-      x: -10, z: 1, w: 7, d: 2.2, rot: 0,
-      areaM2: isLarge ? 180000 : isMicro ? 24 : 180,
+      x: -11, z: 0.1, w: 7.5, d: 2.3, rot: 0,
+      areaM2: isLarge ? 260000 : isMicro ? 24 : 180,
       soilType: "Limoneux",
-      ph: 6.8,
-      omPct: 4.5,
-      cropId: isPoly ? "luzerne" : "poireau",
-      plantedDayOffset: -58,
-      gddAccumulated: 740,
-      stage: "Croissance avancée",
-      moisturePct: 62,
-      healthPct: 94,
-      diseaseRisk: 11,
+      ph: 6.8, omPct: 4.5,
+      cropId: "tournesol",
+      plantedDayOffset: -58, gddAccumulated: 1050,
+      stage: "Floraison", moisturePct: 62, healthPct: 94, diseaseRisk: 11,
       irrigationValveOpen: false,
       history: makeHistory("carotte", "chou"),
     },
     {
       id: "P4",
-      name: "Planche P4 — Courgettes",
+      name: "Planche P4 — Laitues & Choux",
       zone: "Plein champ",
-      x: -10, z: 5.5, w: 7, d: 2.2, rot: 0,
+      x: -11, z: 3.4, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 120000 : isMicro ? 24 : 150,
       soilType: "Argilo-calcaire",
-      ph: 7.0,
-      omPct: 4.0,
-      cropId: "courgette",
-      plantedDayOffset: -31,
-      gddAccumulated: 460,
-      stage: "Floraison",
-      moisturePct: 48,
-      healthPct: 88,
-      diseaseRisk: 28,
+      ph: 7.0, omPct: 4.0,
+      cropId: "laitue",
+      plantedDayOffset: -31, gddAccumulated: 420,
+      stage: "Pommaison", moisturePct: 52, healthPct: 90, diseaseRisk: 22,
       irrigationValveOpen: false,
       history: makeHistory("epinard", "pomme_de_terre"),
     },
     {
+      id: "P5",
+      name: "Parcelle P5 — Vigne Palissée",
+      zone: "Plein champ",
+      x: -11, z: 6.7, w: 7.5, d: 2.3, rot: 0,
+      areaM2: isLarge ? 95000 : 220,
+      soilType: "Argilo-calcaire",
+      ph: 7.1, omPct: 3.6,
+      cropId: "vigne",
+      plantedDayOffset: -70, gddAccumulated: 980,
+      stage: "Véraison", moisturePct: 49, healthPct: 92, diseaseRisk: 19,
+      irrigationValveOpen: false,
+      history: makeHistory("engrais_vert", "ble"),
+    },
+    {
       id: "S1",
-      name: "Serre Chapelle 1 — Tomates",
+      name: "Serre Chapelle 1 — Tomates Grappe",
       zone: "Serre",
-      x: 2, z: -7, w: 8, d: 4.2, rot: 0,
+      x: 1.5, z: -5.5, w: 8.5, d: 4.2, rot: 0,
       areaM2: isMicro ? 120 : isLarge ? 2500 : 600,
       soilType: "Amendé compost",
-      ph: 6.6,
-      omPct: 6.1,
+      ph: 6.6, omPct: 6.1,
       cropId: "tomate",
-      plantedDayOffset: -45,
-      gddAccumulated: 790,
-      stage: "Nouaison / Récolte proche",
-      moisturePct: 54,
-      healthPct: 84,
-      diseaseRisk: 39,
+      plantedDayOffset: -45, gddAccumulated: 890,
+      stage: "Maturité / Récolte proche",
+      moisturePct: 56, healthPct: 88, diseaseRisk: 34,
       irrigationValveOpen: false,
-      ventOpeningPct: 35,
-      shadeScreenPct: 0,
-      indoorTempC: 24.8,
-      indoorRhPct: 76,
-      co2Ppm: 460,
+      ventOpeningPct: 40, shadeScreenPct: 0,
+      indoorTempC: 24.6, indoorRhPct: 74, co2Ppm: 460,
       history: makeHistory("epinard", "laitue"),
     },
     {
       id: "S2",
-      name: "Tunnel 2 — Fraises & Jeunes Pousses",
+      name: "Tunnel 2 — Fraises sur Butte",
       zone: "Serre",
-      x: 2, z: 0, w: 8, d: 4.2, rot: 0,
+      x: 1.5, z: 0.2, w: 8.5, d: 4.2, rot: 0,
       areaM2: isMicro ? 100 : isLarge ? 1800 : 480,
       soilType: "Sablo-limoneux",
-      ph: 6.3,
-      omPct: 5.4,
+      ph: 6.3, omPct: 5.4,
       cropId: "fraise",
-      plantedDayOffset: -48,
-      gddAccumulated: 650,
-      stage: "Floraison / Récolte",
-      moisturePct: 61,
-      healthPct: 92,
-      diseaseRisk: 21,
+      plantedDayOffset: -48, gddAccumulated: 690,
+      stage: "Fructification",
+      moisturePct: 63, healthPct: 93, diseaseRisk: 18,
       irrigationValveOpen: false,
-      ventOpeningPct: 45,
-      shadeScreenPct: 0,
-      indoorTempC: 23.2,
-      indoorRhPct: 68,
-      co2Ppm: 430,
+      ventOpeningPct: 45, shadeScreenPct: 0,
+      indoorTempC: 23.1, indoorRhPct: 67, co2Ppm: 430,
       history: makeHistory("radis", "haricot"),
     },
   ];
 
   const structures = isSandbox
     ? [
-        { id: "STR-WX", type: "weather_station", label: "Station Météo IoT", x: 0, z: -12, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
+        { id: "STR-WX", type: "weather_station", label: "Station Météo IoT", x: 0, z: -14, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
       ]
     : [
-        { id: "STR-WX", type: "weather_station", label: "Station Météo Pro", x: -2, z: -13, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
-        { id: "STR-HAN", type: "hangar", label: "Hangar Matériel & Chambre Froide", x: 13, z: -10, w: 7, d: 5, h: 3.8, rot: 0 },
-        { id: "STR-SOL", type: "solar_array", label: "Centrale Solaire PV", x: 13, z: -3, w: 5.5, d: 3.2, h: 1.8, rot: 0, kwPeak: isLarge ? 65 : isMicro ? 6 : 24 },
-        { id: "STR-WND", type: "wind_turbine", label: "Éolienne Ferme", x: 15, z: -14, w: 2, d: 2, h: 7.5, rot: 0, kwPeak: isLarge ? 25 : 5 },
-        { id: "STR-TANK", type: "water_tank", label: "Réserve Principale Eau", x: -3, z: -9, w: 2.6, d: 2.6, h: 3.0, rot: 0 },
-        { id: "STR-POND", type: "pond", label: "Bassin Rétention Pluie", x: -12, z: 12, w: 6.5, d: 5, h: 0.3, rot: 0 },
-        { id: "STR-CMP", type: "compost", label: "Plateforme Compost", x: 13, z: 11, w: 4, d: 3, h: 1.0, rot: 0 },
-        { id: "STR-API", type: "apiary", label: "Rucher (4 ruches)", x: -16, z: -12, w: 3, d: 2, h: 1.0, rot: 0 },
-        { id: "STR-H1", type: "hedge_tree", label: "Haie Agroforestière Nord", x: -16, z: -4, w: 2, d: 2, h: 4.2, rot: 0 },
-        { id: "STR-H2", type: "hedge_tree", label: "Arbre Fruitier Verger", x: -16, z: 3, w: 2, d: 2, h: 4.0, rot: 0 },
-        { id: "STR-COOP", type: isPoly ? "coop_fixed" : "coop_mobile", label: isPoly ? "Poulailler Ponte 1200" : "Poulailler Mobile", x: 2, z: 9, w: isPoly ? 7 : 3.8, d: isPoly ? 4 : 2.6, h: isPoly ? 2.8 : 2.0, rot: 0, doorOpen: true },
-        ...(isPoly || isLarge
-          ? [
-              { id: "STR-BARN", type: "barn_livestock", label: "Stabulation & Pâturage", x: 12, z: 4, w: 8, d: 5, h: 3.6, rot: 0 },
-              { id: "STR-PAD1", type: "paddock", label: "Paddock A (Pâturage tournant)", x: -2, z: 13, w: 9, d: 6, h: 0.25, rot: 0 },
-            ]
-          : []),
+        // Corps de ferme traditionnel au Nord + Cour & Boutique
+        { id: "STR-CORPS", type: "farmhouse_courtyard", label: "Corps de Ferme Principal (Pierre & Tuiles)", x: 0, z: -14.5, w: 11, d: 8.5, h: 4.8, rot: 0 },
+        { id: "STR-BARN-ST", type: "stone_barn", label: "Grange en Pierre & Foin", x: -11, z: -13.5, w: 8.5, d: 5, h: 4.5, rot: 0 },
+        { id: "STR-SHOP", type: "farm_shop", label: "Boutique Vente à la Ferme", x: -5.5, z: -9.2, w: 4.8, d: 3.5, h: 3.1, rot: 0 },
+        { id: "STR-SILO", type: "grain_silo", label: "Silo Céréales & Aliment", x: 8.2, z: -15, w: 3.0, d: 3.0, h: 6.5, rot: 0 },
+        { id: "STR-HAN", type: "hangar", label: "Hangar Robots & Chambre Froide", x: 13.5, z: -11, w: 7.5, d: 5, h: 3.9, rot: 0 },
+
+        // Chemins d'exploitation & Route cour
+        { id: "STR-RD1", type: "road_paved", label: "Cour Empierrée Corps de Ferme", x: 0, z: -9.5, w: 9, d: 2.8, h: 0.1, rot: 0 },
+        { id: "STR-PTH1", type: "path_dirt", label: "Allée Centrale Exploitation", x: -4.8, z: -1, w: 2.2, d: 16, h: 0.08, rot: 0 },
+        { id: "STR-PTH2", type: "path_dirt", label: "Chemin des Pâturages", x: 4, z: 5.5, w: 15, d: 2.0, h: 0.08, rot: 0 },
+
+        // Haies bocageres, murets & verger agroforestier
+        { id: "STR-HDG1", type: "hedge_row", label: "Haie Brise-Vent Nord-Ouest", x: -17.5, z: -5, w: 1.4, d: 11, h: 2.8, rot: 0 },
+        { id: "STR-HDG2", type: "hedge_row", label: "Haie Mellifère Sud-Ouest", x: -17.5, z: 5, w: 1.4, d: 9, h: 2.6, rot: 0 },
+        { id: "STR-WALL1", type: "stone_wall", label: "Muret Pierre Sèche Cour", x: -6, z: -11, w: 5.5, d: 0.7, h: 1.1, rot: 0 },
+        { id: "STR-TR1", type: "hedge_tree", label: "Pommier Verger 1", x: -15.5, z: -9.5, w: 2.4, d: 2.4, h: 4.2, rot: 0 },
+        { id: "STR-TR2", type: "hedge_tree", label: "Noyer Ancien", x: 7.2, z: -9.5, w: 2.8, d: 2.8, h: 4.8, rot: 0 },
+
+        // Riviere au sud + Pont
+        { id: "STR-RIV1", type: "river_seg", label: "Rivière de la Drôme (Amont)", x: -12, z: 12.2, w: 12, d: 3.2, h: 0.14, rot: 0.08 },
+        { id: "STR-RIV2", type: "river_seg", label: "Rivière (Passage Pont)", x: 0, z: 12.8, w: 12, d: 3.4, h: 0.14, rot: -0.05 },
+        { id: "STR-RIV3", type: "river_seg", label: "Rivière (Aval)", x: 12, z: 12.1, w: 12, d: 3.2, h: 0.14, rot: 0.06 },
+        { id: "STR-BRG", type: "bridge", label: "Pont de Pierre de la Ferme", x: -4.8, z: 12.5, w: 4.2, d: 4.2, h: 1.3, rot: 0 },
+
+        // Eau, Energie, Capteurs, Elevage & Ponte
+        { id: "STR-WX", type: "weather_station", label: "Station Météo Pro", x: -4.8, z: -13.5, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
+        { id: "STR-SOL", type: "solar_array", label: "Ombrière Solaire PV", x: 13.5, z: -4.5, w: 5.5, d: 3.2, h: 2.0, rot: 0, kwPeak: isLarge ? 65 : isMicro ? 6 : 24 },
+        { id: "STR-WND", type: "wind_turbine", label: "Éolienne Ferme", x: 16.5, z: -15, w: 2, d: 2, h: 7.8, rot: 0, kwPeak: isLarge ? 25 : 5 },
+        { id: "STR-TANK", type: "water_tank", label: "Château d'Eau / Cuve", x: 10.5, z: -7.5, w: 2.8, d: 2.8, h: 3.2, rot: 0 },
+        { id: "STR-POND", type: "pond", label: "Mare & Réserve Pluie", x: -15, z: 10.2, w: 5.2, d: 4.2, h: 0.3, rot: 0 },
+        { id: "STR-API", type: "apiary", label: "Rucher (4 ruches)", x: -16, z: -12, w: 3.2, d: 2, h: 1.1, rot: 0 },
+        { id: "STR-COOP", type: isPoly ? "coop_fixed" : "coop_mobile", label: isPoly ? "Bâtiment Ponte 1200" : "Poulailler Plein Air", x: 0.5, z: 8.2, w: isPoly ? 7 : 4.0, d: isPoly ? 4 : 2.8, h: isPoly ? 2.9 : 2.1, rot: 0, doorOpen: true },
+        { id: "STR-BARN", type: "barn_livestock", label: "Étable & Bergerie", x: 13.5, z: 2.5, w: 8.5, d: 5, h: 3.8, rot: 0 },
+        { id: "STR-PAD1", type: "paddock", label: "Paddock A (Vaches & Brebis)", x: 10.5, z: 8.2, w: 10.5, d: 5.5, h: 0.25, rot: 0 },
       ];
 
   const livestock = isSandbox ? [] : [
     {
       id: "LOT-POULES",
       kind: "ponte",
-      name: isPoly ? "Lot Poules Pondeuses Lohmann" : "Poules Pondeuses Plein Air",
+      speciesId: "ponte",
+      name: isPoly ? "Poules Pondeuses Lohmann" : "Poules Pondeuses & Coq",
       species: "Poules pondeuses",
       count: isPoly ? 1200 : isMicro ? 60 : 220,
       ageWeeks: 34,
@@ -796,28 +928,80 @@ export function buildPresetState(presetId = "maraichage_serre") {
       coopStructureId: "STR-COOP",
       parasiteRiskPct: 12,
     },
-    ...(isPoly || isLarge
-      ? [
-          {
-            id: "LOT-BOVIN",
-            kind: "elevage",
-            name: isLarge ? "Troupeau Charolais / Lait" : "Vaches Allaitantes & Veaux",
-            species: "Bovins plein air",
-            count: isLarge ? 95 : 32,
-            ageWeeks: 140,
-            layingRatePct: 0,
-            milkOrGainPerDay: 1.15,
-            feedGramsPerDay: 14500,
-            waterLitersPerDay: 55,
-            welfarePct: 92,
-            doorOpen: true,
-            lightSchedule: "Naturel",
-            paddockName: "Paddock A (Rotation J+4)",
-            coopStructureId: "STR-BARN",
-            parasiteRiskPct: 9,
-          },
-        ]
-      : []),
+    {
+      id: "LOT-CANARDS",
+      kind: "ponte",
+      speciesId: "canard",
+      name: "Canards Coureurs Indiens (Anti-limaces)",
+      species: "Canards coureurs",
+      count: isMicro ? 12 : 24,
+      ageWeeks: 28,
+      layingRatePct: 68,
+      eggsToday: Math.round((isMicro ? 12 : 24) * 0.68),
+      eggPriceUnit: 0.55,
+      feedGramsPerDay: 140,
+      waterLitersPerDay: 0.6,
+      welfarePct: 97,
+      doorOpen: true,
+      lightSchedule: "Naturel",
+      paddockName: "Abords Mare & Planches",
+      coopStructureId: "STR-COOP",
+      parasiteRiskPct: 5,
+    },
+    {
+      id: "LOT-BOVIN",
+      kind: "elevage",
+      speciesId: "bovin_lait",
+      name: isLarge ? "Troupeau Laitier & Charolais" : "Vaches Laitières Pie-Noir",
+      species: "Vaches laitières (Pie Noir)",
+      count: isLarge ? 85 : isMicro ? 4 : 18,
+      ageWeeks: 140,
+      layingRatePct: 0,
+      feedGramsPerDay: 15500,
+      waterLitersPerDay: 65,
+      welfarePct: 93,
+      doorOpen: true,
+      lightSchedule: "Naturel",
+      paddockName: "Paddock A (Rotation J+3)",
+      coopStructureId: "STR-BARN",
+      parasiteRiskPct: 8,
+    },
+    {
+      id: "LOT-OVIN",
+      kind: "elevage",
+      speciesId: "ovin",
+      name: "Troupeau Brebis & Agneaux",
+      species: "Moutons / Brebis",
+      count: isPoly ? 65 : isMicro ? 8 : 26,
+      ageWeeks: 90,
+      layingRatePct: 0,
+      feedGramsPerDay: 2200,
+      waterLitersPerDay: 6,
+      welfarePct: 95,
+      doorOpen: true,
+      lightSchedule: "Naturel",
+      paddockName: "Paddock A & Verger",
+      coopStructureId: "STR-BARN",
+      parasiteRiskPct: 7,
+    },
+    {
+      id: "LOT-PORCIN",
+      kind: "elevage",
+      speciesId: "porcin",
+      name: "Cochons Plein Air Gascons",
+      species: "Cochons plein air",
+      count: isMicro ? 4 : 12,
+      ageWeeks: 36,
+      layingRatePct: 0,
+      feedGramsPerDay: 3100,
+      waterLitersPerDay: 12,
+      welfarePct: 94,
+      doorOpen: true,
+      lightSchedule: "Naturel",
+      paddockName: "Parc Chênaie Est",
+      coopStructureId: "STR-BARN",
+      parasiteRiskPct: 6,
+    },
   ];
 
   const equipment = isSandbox
@@ -833,7 +1017,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
           hoursTotal: 14,
           nextServiceHours: 250,
           costPerHour: 2.5,
-          x: 10, z: -8, targetX: 10, targetZ: -8,
+          x: 11, z: -8, targetX: 11, targetZ: -8,
           targetPlotId: null,
           task: "En attente de mission",
         },
@@ -850,9 +1034,9 @@ export function buildPresetState(presetId = "maraichage_serre") {
           hoursTotal: 312,
           nextServiceHours: 500,
           costPerHour: 2.4,
-          x: -9, z: -8, targetX: -7, targetZ: -8,
+          x: -11, z: -6.5, targetX: -9, targetZ: -6.5,
           targetPlotId: "P1",
-          task: "Binage inter-rang P1",
+          task: "Binage optique inter-rang P1",
         },
         {
           id: "ROB-DRONE",
@@ -865,28 +1049,28 @@ export function buildPresetState(presetId = "maraichage_serre") {
           hoursTotal: 94,
           nextServiceHours: 150,
           costPerHour: 4.0,
-          x: 2, z: -7, targetX: 2, targetZ: -7,
+          x: 1.5, z: -5.5, targetX: 1.5, targetZ: -5.5,
           targetPlotId: "S1",
           task: "Scan santé foliaire & mildiou",
         },
         {
           id: "ROB-TRACT",
-          name: isLarge ? "Tracteur Autonome RTK 160cv" : "Micro-Tracteur / Porte-outils Électrique",
-          category: isLarge ? "Tracteur autonome" : "Outil semi-autonome",
+          name: isLarge ? "Tracteur Autonome RTK 160cv" : "Porte-Outils Autonome RTK",
+          category: "Tracteur autonome",
           autonomous: true,
           kind: "tractor",
-          status: "idle",
-          batteryPct: 95,
+          status: "working",
+          batteryPct: 89,
           hoursTotal: 640,
           nextServiceHours: 750,
           costPerHour: isLarge ? 32 : 9.5,
-          x: 11, z: -6, targetX: 11, targetZ: -6,
-          targetPlotId: null,
-          task: "Stationné au hangar",
+          x: -11, z: 0.1, targetX: -9, targetZ: 0.1,
+          targetPlotId: "P3",
+          task: "Passage mécanique P3",
         },
         {
           id: "EQ-TRACT-STD",
-          name: "Tracteur Diesel 75cv (Classique)",
+          name: "Tracteur Chargeur 85cv (Classique)",
           category: "Engin non-autonome",
           autonomous: false,
           kind: "manual",
@@ -896,7 +1080,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
           hoursTotal: 2410,
           nextServiceHours: 2500,
           costPerHour: 28,
-          task: "Travail sol & transport remorque",
+          task: "Fourrage & transport remorque",
         },
         {
           id: "EQ-MOTO",
@@ -929,10 +1113,10 @@ export function buildPresetState(presetId = "maraichage_serre") {
 
   const waterCapM3 = isMicro ? 45 : isLarge ? 2500 : 480;
   const resources = [
-    { id: "RES-EAU", name: "Eau d'irrigation (Cuves + Bassin)", category: "Eau", unit: "m³", stock: Math.round(waterCapM3 * 0.74), max: waterCapM3, dailyUse: isLarge ? 62 : isMicro ? 1.4 : 9.5, unitCost: 0.45, reorderPoint: Math.round(waterCapM3 * 0.25) },
+    { id: "RES-EAU", name: "Eau d'irrigation (Cuves + Mare + Rivière)", category: "Eau", unit: "m³", stock: Math.round(waterCapM3 * 0.74), max: waterCapM3, dailyUse: isLarge ? 62 : isMicro ? 1.4 : 9.5, unitCost: 0.45, reorderPoint: Math.round(waterCapM3 * 0.25) },
     { id: "RES-ELEC", name: "Batterie Énergie Solaire/Éolien", category: "Électricité", unit: "kWh", stock: isLarge ? 210 : isMicro ? 18 : 68, max: isLarge ? 300 : isMicro ? 24 : 90, dailyUse: isLarge ? 140 : isMicro ? 9 : 34, unitCost: 0.21, reorderPoint: 20 },
     { id: "RES-SEM", name: "Stock Semences & Plants", category: "Semences", unit: "doses", stock: isLarge ? 950 : 185, max: isLarge ? 1400 : 300, dailyUse: isLarge ? 12 : 3.5, unitCost: 1.8, reorderPoint: 45 },
-    { id: "RES-ALIM-P", name: "Aliment Ponte Bio (Céréales/Soja)", category: "Alimentation", unit: "kg", stock: isPoly ? 3800 : isMicro ? 210 : 820, max: isPoly ? 6000 : isMicro ? 400 : 1500, dailyUse: isPoly ? 146 : isMicro ? 7.5 : 27, unitCost: 0.62, reorderPoint: isPoly ? 900 : 120 },
+    { id: "RES-ALIM-P", name: "Aliment Bio & Fourrage (Céréales/Foin)", category: "Alimentation", unit: "kg", stock: isPoly ? 4800 : isMicro ? 450 : 1820, max: isPoly ? 8000 : isMicro ? 800 : 3000, dailyUse: isPoly ? 190 : isMicro ? 18 : 65, unitCost: 0.58, reorderPoint: isPoly ? 1100 : 250 },
     { id: "RES-AGRO", name: "Agrofournitures (Paillage, Alvéoles, Biocontrôle)", category: "Agrofourniture", unit: "unités", stock: 160, max: 300, dailyUse: 3.2, unitCost: 4.5, reorderPoint: 40 },
     { id: "RES-GNR", name: "Carburant GNR / Huiles", category: "Énergie fossile", unit: "L", stock: isLarge ? 1600 : 320, max: isLarge ? 3000 : 600, dailyUse: isLarge ? 42 : 5.5, unitCost: 1.38, reorderPoint: 100 },
   ];
@@ -991,12 +1175,12 @@ export function buildPresetState(presetId = "maraichage_serre") {
       ? [
           { id: "ST-1", name: "Chef de culture & Robotique", role: "Pilotage & Agro", weeklyHours: 42, hourlyCost: 26 },
           { id: "ST-2", name: "Conducteur d'engins / Maintenance", role: "Grandes cultures", weeklyHours: 39, hourlyCost: 21 },
-          { id: "ST-3", name: "Équipe Maraîchage (x2)", role: "Serres & Récolte", weeklyHours: 70, hourlyCost: 17.5 },
+          { id: "ST-3", name: "Équipe Maraîchage & Élevage (x2)", role: "Serres, Cheptel & Récolte", weeklyHours: 70, hourlyCost: 17.5 },
           { id: "ST-4", name: "Saisonnier Été/Automne", role: "Conditionnement", weeklyHours: 35, hourlyCost: 15.8 },
         ]
       : [
           { id: "ST-1", name: "Exploitant(e) Principal(e)", role: "Pilotage / Agronomie", weeklyHours: 42, hourlyCost: 24 },
-          { id: "ST-2", name: "Maraîcher / Soigneur Ponte", role: "Planches, Serre & Œufs", weeklyHours: 35, hourlyCost: 18 },
+          { id: "ST-2", name: "Maraîcher / Soigneur Élevage", role: "Planches, Serre & Cheptel", weeklyHours: 35, hourlyCost: 18 },
           { id: "ST-3", name: "Saisonnier (Renfort pic)", role: "Semis & Récoltes", weeklyHours: 20, hourlyCost: 16 },
         ];
 
@@ -1022,7 +1206,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
   });
 
   return {
-    version: 1,
+    version: 2,
     farm: {
       name: scaleMeta.name,
       presetId,
@@ -1038,11 +1222,12 @@ export function buildPresetState(presetId = "maraichage_serre") {
         climate: loc.climate,
       },
       gamification: {
-        xp: 420,
-        level: 4,
+        xp: 480,
+        level: 5,
         simulatedFutureUsed: false,
       },
     },
+    terrain,
     simulation: {
       dayOffset: 0,
       hourOfDay: 10.5,
@@ -1073,10 +1258,10 @@ export function buildPresetState(presetId = "maraichage_serre") {
     finances: {
       cashBalance: isLarge ? 92000 : isMicro ? 14500 : 38500,
       monthlyFixedCosts: isLarge ? 14200 : isMicro ? 1150 : 3900,
-      salesChannel: "Vente directe + AMAP + Coopérative",
+      salesChannel: "Boutique à la ferme + AMAP + Coopérative",
       ledger: [
-        { id: "TX-1", date: new Date().toISOString().slice(0, 10), type: "recette", atelier: "Maraîchage & Serres", label: "Panier AMAP & Marché semaine", amount: isLarge ? 8400 : isMicro ? 980 : 2850 },
-        { id: "TX-2", date: new Date().toISOString().slice(0, 10), type: "recette", atelier: "Élevage de ponte", label: "Vente œufs fermiers", amount: isPoly ? 3200 : isMicro ? 340 : 1120 },
+        { id: "TX-1", date: new Date().toISOString().slice(0, 10), type: "recette", atelier: "Maraîchage & Serres", label: "Boutique ferme & Paniers AMAP", amount: isLarge ? 8400 : isMicro ? 980 : 2850 },
+        { id: "TX-2", date: new Date().toISOString().slice(0, 10), type: "recette", atelier: "Élevage & Ponte", label: "Vente œufs fermiers, lait & fromages", amount: isPoly ? 3800 : isMicro ? 420 : 1490 },
         { id: "TX-3", date: new Date().toISOString().slice(0, 10), type: "charge", atelier: "Approvisionnement", label: "Aliment bio & semences", amount: isLarge ? -3100 : isMicro ? -290 : -920 },
       ],
     },
@@ -1089,13 +1274,13 @@ export function buildPresetState(presetId = "maraichage_serre") {
     ],
     hud: {
       alerts: [
-        { id: "HUD-INIT-1", timestamp: new Date().toISOString(), severity: "warn", message: "Planche P2 humidité basse (34 %) — irrigation ou rover recommandé" },
-        { id: "HUD-INIT-2", timestamp: new Date().toISOString(), severity: "info", message: "Rover R-01 actif sur P1 · Drone D-02 en scan Serre 1" },
+        { id: "HUD-INIT-1", timestamp: new Date().toISOString(), severity: "warn", message: "Planche P2 humidité 36 % — arrosage ou binage recommandé" },
+        { id: "HUD-INIT-2", timestamp: new Date().toISOString(), severity: "info", message: "Rover R-01 sur P1 · Drone D-02 sur S1 · Tracteur RTK sur P3" },
       ],
       voiceHistory: [],
     },
     aiSettings: {
-      provider: "local", // local | ollama | openai_compat
+      provider: "local",
       ollamaUrl: "http://localhost:11434",
       model: "mistral",
       apiKey: "",

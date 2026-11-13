@@ -101,11 +101,13 @@ try {
         @'
 <!doctype html><html><body><div id="mount"></div><div id="res">RUNNING</div>
 <script type="module">
-import { buildPresetState, SCALE_PRESETS } from "/src/data/presets.js";
+import { buildPresetState, SCALE_PRESETS, BUILDING_CATALOG, ANIMAL_SPECIES, TERRAIN_PRESETS } from "/src/data/presets.js";
 import { simulateFuture, evaluateRotation } from "/src/engine/predictor.js";
 import { evaluateAutomations, dispatchRobot, toggleIrrigation, setGreenhouseVent, toggleCoopDoor } from "/src/engine/automation.js";
 import { processNaturalCommand } from "/src/engine/aiAssistant.js";
 import { injectWeatherEvent } from "/src/engine/weather.js";
+import { getTerrainHeight, sculptTerrainAt, Farm3DEngine } from "/src/engine/engine3d.js";
+import { drawDemoVideoScanFrame, analyzeFrameToFarmLayout, applyScanToFarmState } from "/src/engine/scanner3d.js";
 import { renderView3D } from "/src/ui/view3d.js";
 import { renderViewAgronomy } from "/src/ui/viewAgronomy.js";
 import { renderViewLivestock } from "/src/ui/viewLivestock.js";
@@ -116,12 +118,30 @@ import { renderViewEcosystem } from "/src/ui/viewEcosystem.js";
 
 const out = document.getElementById("res");
 try {
+  if (BUILDING_CATALOG.length < 24 || ANIMAL_SPECIES.length < 8 || TERRAIN_PRESETS.length < 4) {
+    throw new Error("V2 catalog sizes invalid");
+  }
   for (const p of SCALE_PRESETS) {
     const s = buildPresetState(p.id);
     const sim = simulateFuture(s, 90, "heatwave");
     if (!sim.daily || sim.daily.length !== 91) throw new Error("Bad horizon for " + p.id);
   }
   const st = buildPresetState("polyculture");
+  const hBefore = getTerrainHeight(st, 0, 0);
+  sculptTerrainAt(st, 0, 0, "raise", 6, 0.8);
+  const hAfter = getTerrainHeight(st, 0, 0);
+  if (!(hAfter > hBefore)) throw new Error("sculptTerrainAt did not raise terrain height");
+
+  // Test Video/Camera 3D Reconstruction Scanner
+  const scanCanvas = document.createElement("canvas");
+  scanCanvas.width = 520; scanCanvas.height = 280;
+  drawDemoVideoScanFrame(scanCanvas.getContext("2d"), 520, 280, "coteau_ferme", 1.2);
+  const scanRes = analyzeFrameToFarmLayout(scanCanvas);
+  if (!scanRes.detections || scanRes.detections.length < 4) throw new Error("Scanner failed to detect farm zones");
+  const stScan = buildPresetState("micro_urbaine");
+  applyScanToFarmState(stScan, scanRes);
+  if (stScan.structures.length < 4) throw new Error("applyScanToFarmState did not populate 3D structures");
+
   const rot = evaluateRotation(st.plots[0], "tomate");
   if (typeof rot.score !== "number") throw new Error("Rotation score invalid");
   injectWeatherEvent(st, "storm");
@@ -133,9 +153,14 @@ try {
   const fc = simulateFuture(st, 60, "normal");
   const ctx = {
     state: st, forecast: fc,
-    uiState: { overlay: "normal", showArPins: false, buildActive: false, buildType: "bed_open", buildRot: 0, selectedObject: null, agroTab: "plots", forecastHorizon: 60 },
+    uiState: { overlay: "normal", showArPins: false, buildActive: false, buildCategory: "all", buildType: "bed_open", buildRot: 0, sculptActive: true, sculptTool: "raise", sculptRadius: 5, scannerOpen: true, demoScanId: "coteau_ferme", selectedObject: null, agroTab: "plots", forecastHorizon: 60 },
     engine3d: null, serverStatus: { online: true, mcpTools: 6 },
-    save: () => {}, rerender: () => {}, refreshForecastOnly: () => {}, replaceState: () => {}, toast: () => {}, mountCanvas: () => {}
+    save: () => {}, rerender: () => {}, refreshForecastOnly: () => {}, replaceState: () => {}, toast: () => {}, mountCanvas: (c) => {
+      if (c) {
+        const eng = new Farm3DEngine(c, {});
+        eng.render(st, fc, 0.016);
+      }
+    }
   };
   renderView3D(mount, ctx);
   for (const tab of ["plots", "rotations", "planning", "diseases"]) {
