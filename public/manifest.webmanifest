@@ -1,0 +1,15 @@
+{
+  "name": "SG Vision Farmer — Jumeau Numérique 3D",
+  "short_name": "SG Farmer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b131e",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

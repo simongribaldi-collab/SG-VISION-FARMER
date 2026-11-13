@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SG Vision Farmer — Lunettes Connectées AR HUD</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="glasses-body">
+  <div class="glasses-hud-frame">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid rgba(56,189,248,0.28);padding-bottom:10px;margin-bottom:14px;">
+      <div>
+        <div style="font-size:18px;font-weight:800;letter-spacing:0.04em;color:#7dd3fc;">◈ SG VISION FARMER — HUD LUNETTES AR</div>
+        <div id="hud-meta" style="font-size:12px;color:#93c5fd;">Connexion en cours au jumeau numérique...</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" id="btn-voice">🎙️ Commande vocale</button>
+        <button class="btn btn-sm" id="btn-refresh">⟳ Synchroniser</button>
+        <a class="btn btn-sm" href="/">← Cockpit 3D</a>
+      </div>
+    </div>
+
+    <div class="grid-4" id="hud-kpis" style="margin-bottom:14px;"></div>
+
+    <div class="grid-2" style="margin-bottom:14px;">
+      <div class="card" style="background:rgba(4,20,30,0.72);border-color:rgba(56,189,248,0.35);">
+        <div class="card-header">
+          <h3 class="card-title">📍 Cibles Terrain & Balises AR</h3>
+          <span class="pill info" id="hud-link-badge">Temps réel</span>
+        </div>
+        <div id="hud-targets" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
+
+      <div class="card" style="background:rgba(4,20,30,0.72);border-color:rgba(56,189,248,0.35);">
+        <div class="card-header">
+          <h3 class="card-title">🔔 Alertes & Consignes IA</h3>
+        </div>
+        <div id="hud-alerts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+        <div style="border-top:1px solid rgba(56,189,248,0.22);padding-top:10px;">
+          <div style="font-size:12px;color:#7dd3fc;margin-bottom:6px;">Actions mains-libres / Commandes rapides :</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;" id="hud-quick-cmds"></div>
+          <form id="hud-cmd-form" style="display:flex;gap:6px;">
+            <input class="input" id="hud-cmd-input" placeholder="Ex: Envoie le rover sur P2 / Ouvre les serres / Note 12 kg tomates..." />
+            <button class="btn btn-primary btn-sm" type="submit">Exécuter</button>
+          </form>
+          <div id="hud-cmd-feedback" class="muted" style="margin-top:6px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/ui/glassesHud.js"></script>
+</body>
+</html>

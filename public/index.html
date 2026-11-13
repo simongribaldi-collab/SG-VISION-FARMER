@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SG Vision Farmer — Jumeau Numérique 3D & Pilotage Prédictif</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <div style="padding:40px;text-align:center;color:#93a7b8;">
+      Chargement de <strong>SG Vision Farmer</strong>...
+      <div id="file-warning" style="display:none;margin-top:16px;padding:12px;border:1px solid #f59e0b;border-radius:10px;color:#fde68a;max-width:520px;margin-inline:auto;">
+        Ouvrez cette application via <code>DEMARRER-FARMER.bat</code> (<code>http://localhost:8765</code>) ou un serveur web pour activer les modules ES et le serveur MCP.
+      </div>
+    </div>
+  </div>
+  <script>
+    if (location.protocol === "file:") {
+      var w = document.getElementById("file-warning");
+      if (w) w.style.display = "block";
+    }
+  </script>
+  <script type="module" src="/src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "outputDirectory": "public",
+  "rewrites": [
+    { "source": "/glasses", "destination": "/glasses.html" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
