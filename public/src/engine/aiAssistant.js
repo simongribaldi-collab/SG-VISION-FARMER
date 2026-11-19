@@ -1,4 +1,4 @@
-import { CROP_CATALOG } from "../data/presets.js";
+import { computeGrangesFinancialPlan, CROP_CATALOG } from "../data/presets.js";
 import { dispatchRobot, pushHudAlert, setGreenhouseVent, toggleCoopDoor, toggleIrrigation } from "./automation.js";
 import { evaluateRotation } from "./predictor.js";
 
@@ -97,6 +97,23 @@ export function processNaturalCommand(state, rawText, forecastSnapshot) {
     }
     pushHudAlert(state, `Production enregistrée : +${qty} ${unit} (${target})`, "info");
     return { reply: `✅ Production enregistrée : ${qty} ${unit} sur ${target} (≈ ${valueEur} €).`, mutated: true };
+  }
+
+  if (/(granges|ze ?309|ze ?375|pr[eê]t|banque|dja|ebe|msa|are|casier|conserverie|safer|earl|reprise|go\/no-go|financement)/i.test(low) && state.projectPlan) {
+    const deferred = state.projectPlan.loan?.deferred24m !== false;
+    const plan = computeGrangesFinancialPlan({ deferred24m: deferred });
+    const y2031 = plan.rows.find((r) => r.yr === 2031);
+    const y2028 = plan.rows[0];
+    return {
+      reply:
+        `📋 Projet Granges-les-Beaumont (ZE 309 + ZE 375 = 1,65 ha · EARL à l'IR) :\n` +
+        `• SAFER cible : 195 000 € (plafond ≤ 200 000 €) · Trésorerie 01/01/2028 : +9 700 €\n` +
+        `• Prêt EARL 185 116 € (${deferred ? "Différé 24 m : 2 + 18 ans" : "20 ans linéaire"}) : ${plan.monthly2829.toLocaleString("fr-FR")} €/m (2028–2029) puis ${plan.monthlyPost.toLocaleString("fr-FR")} €/m · Couverture EBE 29 k€ = ${plan.coverageNoPh} (hors PH) / ${plan.coverageWithPh} (avec PH)\n` +
+        `• Seuil EBE vendeur ratio ≥ 2 : ${plan.minSellerEbeNoPh.toLocaleString("fr-FR")} € (hors PH) / ${plan.minSellerEbeWithPh.toLocaleString("fr-FR")} € (avec PH)\n` +
+        `• Net ferme 2028 : ${y2028.netAvIrM.toLocaleString("fr-FR")} €/m av. IR (${y2028.netApIrM.toLocaleString("fr-FR")} €/m ap. IR) · Croisière 2031 : 135 900 € CA (${plan.cruiseCaPerHaEur.toLocaleString("fr-FR")} €/ha, marge EBE ${plan.cruiseEbeMarginPct} %) -> ${y2031.netAvIrM.toLocaleString("fr-FR")} €/m av. IR / ${y2031.netApIrM.toLocaleString("fr-FR")} €/m ap. IR\n` +
+        `• Transition 2028–2029 (+17 883 € ARE 60 %) : ${plan.tot2829AvIrEur.toLocaleString("fr-FR")} € av. IR / ${plan.tot2829ApIrEur.toLocaleString("fr-FR")} € ap. IR 11 % (lissage ~12 500 € vs 72 000 €)`,
+      mutated: false,
+    };
   }
 
   // 2) Requetes analytiques & previsions

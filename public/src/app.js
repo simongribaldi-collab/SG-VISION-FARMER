@@ -60,7 +60,7 @@ class AppController {
       aiMessages: [
         {
           role: "bot",
-          text: "Bonjour ! Je suis l'Assistant IA de SG Vision Farmer. Demandez-moi une prévision (« Quels risques à 30 jours ? »), une rotation (« Quelle rotation sur P1 ? ») ou pilotez un robot (« Envoie le rover sur P2 »).",
+          text: "Bonjour ! Je suis l'Assistant IA de SG Vision Farmer — Projet Granges-les-Beaumont (ZE 309 + ZE 375, 1,65 ha). Demandez-moi le bilan financier (« Synthèse prêt EARL et EBE »), une prévision (« Quels risques à 30 jours ? »), une rotation (« Quelle rotation sur P1 ? ») ou pilotez un robot (« Envoie le rover sur P2 »).",
         },
       ],
     };
@@ -102,7 +102,7 @@ class AppController {
     const ensureV3 = (st) => {
       if (!st || !st.farm) return null;
       if (!st.terrain || !Array.isArray(st.terrain.heights) || (st.version || 0) < 3) {
-        const presetId = st.farm.presetId || "maraichage_serre";
+        const presetId = st.farm.presetId || "granges_beaumont";
         const fresh = buildPresetState(presetId);
         const def = buildPresetState(presetId);
         const isCustomizedMeta = st.farm.name && st.farm.name !== def.farm.name;
@@ -139,7 +139,7 @@ class AppController {
       }
     } catch {}
 
-    const fresh = buildPresetState("maraichage_serre");
+    const fresh = buildPresetState("granges_beaumont");
     await this.saveState(fresh);
     return fresh;
   }
@@ -260,6 +260,7 @@ class AppController {
         <div class="ai-messages" id="ai-messages"></div>
         <div style="padding:8px 12px;border-top:1px solid var(--border);">
           <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px;">
+            <button class="btn btn-sm" data-ai-chip="Synthèse projet Granges prêt et EBE">📋 Projet EARL</button>
             <button class="btn btn-sm" data-ai-chip="Quels risques à 30 jours ?">🔮 Risques 30j</button>
             <button class="btn btn-sm" data-ai-chip="Quelle rotation sur P1 ?">🔄 Rotation P1</button>
             <button class="btn btn-sm" data-ai-chip="Envoie le rover sur P2">🤖 Rover → P2</button>

@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://localhost:8765/api/health' -TimeoutSec 1; if ($r.ok) { exit 0 } else { exit 1 } } catch { exit 1 }"
+powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/health' -TimeoutSec 1; if ($r.ok) { exit 0 } else { exit 1 } } catch { exit 1 }"
 if %errorlevel%==0 (
   echo [SG Vision Farmer] Serveur deja actif sur http://localhost:8765/
   start "" "http://localhost:8765/"

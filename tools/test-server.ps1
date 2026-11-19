@@ -84,7 +84,7 @@ try {
         $edgeWebGlArgs = @("--headless=new", "--no-sandbox", "--enable-webgl", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--user-data-dir=`"$tmpProf`"")
         $eProc = Start-Process -FilePath $edgePath -ArgumentList ($edgeWebGlArgs + @("--virtual-time-budget=4500", "--dump-dom", "`"$baseUrl/`"")) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $domOut -RedirectStandardError (Join-Path $Root "tools\edge-err.tmp.log")
         $dom = if (Test-Path $domOut) { Get-Content $domOut -Raw -Encoding UTF8 } else { "" }
-        if ($dom -match "Domaine Val-Soleil" -and $dom -match "farm-canvas") {
+        if ($dom -match "Ferme Granges-les-Beaumont" -and $dom -match "farm-canvas") {
             Write-Host "[PASS] Headless Edge rendered SG Vision Farmer + 3D canvas + initial state!"
         } else {
             $errEdge = if (Test-Path (Join-Path $Root "tools\edge-err.tmp.log")) { Get-Content (Join-Path $Root "tools\edge-err.tmp.log") -Raw } else { "" }
@@ -105,7 +105,7 @@ try {
         @'
 <!doctype html><html><body><div id="mount"></div><div id="res">RUNNING</div>
 <script type="module">
-import { buildPresetState, SCALE_PRESETS, BUILDING_CATALOG, ANIMAL_SPECIES, TERRAIN_PRESETS } from "/src/data/presets.js";
+import { buildPresetState, computeGrangesFinancialPlan, SCALE_PRESETS, BUILDING_CATALOG, ANIMAL_SPECIES, TERRAIN_PRESETS } from "/src/data/presets.js";
 import { simulateFuture, evaluateRotation } from "/src/engine/predictor.js";
 import { evaluateAutomations, dispatchRobot, toggleIrrigation, setGreenhouseVent, toggleCoopDoor } from "/src/engine/automation.js";
 import { processNaturalCommand } from "/src/engine/aiAssistant.js";
@@ -137,6 +137,34 @@ try {
     if (s.version !== 3) throw new Error("Preset version must be 3 for " + p.id);
     const sim = simulateFuture(s, 90, "heatwave", 0);
     if (!sim.daily || sim.daily.length !== 91) throw new Error("Bad horizon for " + p.id);
+  }
+
+  // Verify Granges-les-Beaumont (ZE 309 + ZE 375) farm state & exact business plan math
+  const gbState = buildPresetState("granges_beaumont");
+  if (gbState.farm.areaHa !== 1.65 || gbState.plots.length !== 12 || gbState.farm.cadastralParcels?.length !== 2) {
+    throw new Error("Granges-les-Beaumont plots/cadastral structure mismatch");
+  }
+  if (gbState.finances.cashBalance !== 9700 || gbState.livestock[0]?.count !== 249 || gbState.livestock[0]?.eggPriceUnit !== 0.39) {
+    throw new Error("Granges-les-Beaumont cash/hens mismatch");
+  }
+  const planDef = computeGrangesFinancialPlan({ deferred24m: true });
+  const expNetAv = [1089, 2481, 2905, 3159, 3036, 3072];
+  const expNetAp = [1059, 2412, 2825, 3072, 2953, 2734];
+  planDef.rows.forEach((r, idx) => {
+    if (r.netAvIrM !== expNetAv[idx] || r.netApIrM !== expNetAp[idx]) {
+      throw new Error(`Granges row ${r.yr} mismatch: av=${r.netAvIrM}/${expNetAv[idx]} ap=${r.netApIrM}/${expNetAp[idx]}`);
+    }
+  });
+  if (planDef.tot2829AvIrEur !== 60712 || planDef.tot2829ApIrEur !== 59534 || planDef.coverageNoPh !== 2.01 || planDef.coverageWithPh !== 1.59) {
+    throw new Error("Granges transition/banking metrics mismatch");
+  }
+  const planLin = computeGrangesFinancialPlan({ deferred24m: false });
+  if (planLin.monthly2829 !== 1122 || planLin.coverageNoPh !== 2.15 || planLin.minSellerEbeNoPh !== 26922) {
+    throw new Error("Granges non-deferred option metrics mismatch");
+  }
+  const gbAi = processNaturalCommand(gbState, "Synthèse prêt 185116 et ZE 309", simulateFuture(gbState, 30, "normal", 0));
+  if (!gbAi.reply.includes("185 116") && !gbAi.reply.includes("185\u202f116") && !gbAi.reply.includes("60 712") && !gbAi.reply.includes("60\u202f712")) {
+    throw new Error("Granges AI financing reply mismatch: " + gbAi.reply);
   }
 
   const st = buildPresetState("polyculture");
@@ -258,6 +286,12 @@ try {
 
   renderViewRobotics(mount, ctx);
   renderViewForecastFinance(mount, ctx);
+  const gbCtx = { ...ctx, state: gbState, forecast: simulateFuture(gbState, 60, "normal", 0) };
+  renderViewForecastFinance(mount, gbCtx);
+  const finHtml = mount.textContent.replace(/\s+/g, " ");
+  if (!finHtml.includes("ZE 309") || !/185[\s\u00a0\u202f]?116/.test(finHtml)) {
+    throw new Error("Finance view missing Granges-les-Beaumont project block");
+  }
   renderViewEcosystem(mount, ctx);
   out.textContent = "ALL_7_VIEWS_AND_V3_ENGINES_PASS";
 } catch (err) {

@@ -910,7 +910,7 @@ export class Farm3DEngine {
       pushItem("box", boxM, rgba, 0, matType, {});
     };
 
-    // Terrain principal + collines d'horizon + ruban riviere continu
+    // Terrain principal + collines d'horizon + ruban riviere continu + limites cadastrales jaunes
     drawMesh("terrain", 0, 0, 0, 0, 0, 0, 1, 1, 1, [0.27, 0.48, 0.21, 1], 0, MAT.TERRAIN, { castShadow: false });
     if (this.meshes.riverBed.count) {
       drawMesh("riverBed", 0, 0, 0, 0, 0, 0, 1, 1, 1, [0.46, 0.41, 0.34, 1], 0, MAT.GRAVEL, { castShadow: false });
@@ -934,6 +934,33 @@ export class Farm3DEngine {
         this.arPins.push({ id, label, x: pt.x, y: pt.y, warn });
       }
     };
+
+    const parcels = state.farm?.cadastralParcels || [];
+    for (const parcel of parcels) {
+      const pts = parcel.points || [];
+      if (pts.length < 3) continue;
+      let sumX = 0, sumZ = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const [x0, z0] = pts[i];
+        const [x1, z1] = pts[(i + 1) % pts.length];
+        sumX += x0; sumZ += z0;
+        const dx = x1 - x0, dz = z1 - z0;
+        const edgeLen = Math.hypot(dx, dz);
+        if (edgeLen < 0.1) continue;
+        const edgeRot = Math.atan2(-dz, dx);
+        const segs = Math.max(1, Math.ceil(edgeLen / 4.5));
+        for (let sIdx = 0; sIdx < segs; sIdx++) {
+          const t = (sIdx + 0.5) / segs;
+          const mx = x0 + dx * t;
+          const mz = z0 + dz * t;
+          drawMesh("box", mx, H(mx, mz) + 0.04, mz, 0, edgeRot, 0, edgeLen / segs + 0.12, 0.08, 0.24, [0.95, 0.78, 0.14, 0.92], 0.22, MAT.DEFAULT, { castShadow: false });
+        }
+        drawMesh("cyl", x0, H(x0, z0), z0, 0, 0, 0, 0.22, 0.34, 0.22, [0.98, 0.82, 0.16, 1], 0.25, MAT.METAL);
+      }
+      const cx = sumX / pts.length;
+      const cz = sumZ / pts.length;
+      addArPin(`CAD-${parcel.id}`, `🟨 ${parcel.label || parcel.id}`, cx, H(cx, cz) + 2.4, cz, false);
+    }
 
     const windSpeed = state.weather?.current?.windKmh || 12;
     const foliageWind = 0.22 + Math.min(1.2, windSpeed * 0.02);
@@ -1122,7 +1149,9 @@ export class Farm3DEngine {
         }
       }
 
-      this.hitBoxes.push({ kind: "plot", id: p.id, label: p.name, x: p.x, z: p.z, w, d, y0: baseY, y1: baseY + (p.zone === "Serre" ? 3.4 : 1.8), data: p });
+      const effW = Math.abs(cosR) * w + Math.abs(sinR) * d;
+      const effD = Math.abs(sinR) * w + Math.abs(cosR) * d;
+      this.hitBoxes.push({ kind: "plot", id: p.id, label: p.name, x: p.x, z: p.z, w: effW, d: effD, y0: baseY, y1: baseY + (p.zone === "Serre" ? 3.4 : 1.8), data: p });
       addArPin(
         p.id,
         `${crop.icon} ${p.id} · ${snap?.moisturePct ?? p.moisturePct}% eau · ${snap?.progressPct ?? 55}%`,
@@ -1338,10 +1367,11 @@ export class Farm3DEngine {
       } else if (s.type === "hangar" || s.type === "barn_livestock") {
         addPlinth(w, d);
         const isHangar = s.type === "hangar";
-        const wallCol = isHangar ? [0.46, 0.52, 0.58, 1] : [0.68, 0.54, 0.38, 1];
+        const wallCol = isHangar ? (s.lightRoof ? [0.58, 0.62, 0.66, 1] : [0.46, 0.52, 0.58, 1]) : [0.68, 0.54, 0.38, 1];
+        const roofCol = isHangar ? (s.lightRoof ? [0.69, 0.72, 0.74, 1] : [0.36, 0.42, 0.48, 1]) : [0.66, 0.28, 0.18, 1];
         const matWall = isHangar ? MAT.METAL : MAT.WOOD;
         localS("box", 0, 0.06, 0, 0, 0, 0, w, h * 0.68, d, wallCol, emSel, matWall);
-        localS("roof", 0, 0.06 + h * 0.68, 0, 0, 0, 0, w + 0.4, h * 0.42, d + 0.4, isHangar ? [0.36, 0.42, 0.48, 1] : [0.66, 0.28, 0.18, 1], emSel, isHangar ? MAT.METAL : MAT.TILE);
+        localS("roof", 0, 0.06 + h * 0.68, 0, 0, 0, 0, w + 0.4, h * 0.42, d + 0.4, roofCol, emSel, isHangar ? MAT.METAL : MAT.TILE);
         // Poteaux et grande baie d'entree
         for (const px of [-w * 0.46, 0, w * 0.46]) {
           localS("box", px, 0.06, d * 0.51, 0, 0, 0, 0.24, h * 0.68, 0.24, [0.34, 0.24, 0.14, 1], 0, MAT.WOOD);
@@ -1351,6 +1381,38 @@ export class Farm3DEngine {
           // Ratelier foin exterieur
           localS("box", 0, 0.12, d * 0.62, 0, 0, 0, w * 0.72, 0.55, 0.55, [0.54, 0.36, 0.18, 1], 0, MAT.WOOD);
           localS("box", 0, 0.45, d * 0.62, 0, 0, 0, w * 0.65, 0.32, 0.44, [0.88, 0.74, 0.28, 1], 0, MAT.FOLIAGE);
+        }
+      } else if (s.type === "locker_kiosk") {
+        // Kiosque casiers fermiers 24h/24 (D532) : auvent vert, casiers alu et ecran tactile lumineux
+        addPlinth(w, d, [0.52, 0.55, 0.58, 1]);
+        localS("box", 0, 0.06, -0.08, 0, 0, 0, w, h * 0.74, d * 0.76, [0.24, 0.28, 0.34, 1], emSel, MAT.METAL);
+        localS("box", 0, 0.06 + h * 0.74, 0.12, 0.08, 0, 0, w + 0.35, 0.14, d + 0.45, [0.14, 0.58, 0.28, 1], 0.12, MAT.METAL);
+        localS("box", 0, 0.06 + h * 0.84, d * 0.38, 0, 0, 0, w * 0.86, 0.28, 0.08, [0.18, 0.78, 0.36, 1], 0.28, MAT.DEFAULT);
+        for (let c = -1; c <= 1; c++) {
+          for (let r = 0; r < 3; r++) {
+            const lx = c * (w * 0.22) - w * 0.08;
+            const ly = 0.22 + r * (h * 0.21);
+            localS("box", lx, ly, d * 0.365, 0, 0, 0, w * 0.19, h * 0.17, 0.08, [0.88, 0.91, 0.94, 1], 0.04, MAT.METAL);
+          }
+        }
+        // Borne ecran tactile 24/7
+        localS("box", w * 0.34, 0.78, d * 0.37, 0, 0, 0, 0.48, 0.62, 0.09, [0.22, 0.88, 0.96, 1], 0.68, MAT.GLASS);
+      } else if (s.type === "conserverie_coldroom") {
+        // Chambre froide 17m2 panneaux isothermes blancs + condenseur + atelier conserverie inox
+        addPlinth(w, d, [0.56, 0.58, 0.6, 1]);
+        localS("box", 0, 0.06, 0, 0, 0, 0, w, h * 0.72, d, [0.92, 0.94, 0.96, 1], emSel, MAT.METAL);
+        localS("roof", 0, 0.06 + h * 0.72, 0, 0, 0, 0, w + 0.24, h * 0.28, d + 0.24, [0.46, 0.52, 0.58, 1], emSel, MAT.METAL);
+        // Porte isotherme + joint bleu
+        localS("box", -w * 0.16, 0.08, d * 0.505, 0, 0, 0, 1.35, h * 0.58, 0.08, [0.76, 0.82, 0.88, 1], 0, MAT.METAL);
+        localS("box", w * 0.22, 0.88, d * 0.505, 0, 0, 0, 1.0, 0.65, 0.07, [0.78, 0.9, 0.98, 1], nightGlow, MAT.GLASS);
+        // Groupe froid en toiture + cheminee vapeur autoclave
+        localS("box", -w * 0.28, 0.06 + h * 0.88, -d * 0.15, 0, 0, 0, 1.05, 0.62, 0.78, [0.64, 0.68, 0.72, 1], 0, MAT.METAL);
+        localS("cyl", w * 0.32, 0.06 + h * 0.85, 0.1, 0, 0, 0, 0.26, 0.95, 0.26, [0.78, 0.82, 0.86, 1], 0, MAT.METAL);
+      } else if (s.type === "tarp_pad") {
+        // Bache blanche de solarisation / pepiniere + lests perimetriques
+        localS("box", 0, 0.02, 0, 0, 0, 0, w, 0.08, d, [0.92, 0.93, 0.94, 1], emSel, MAT.DEFAULT, { castShadow: false });
+        for (const [bx, bz] of [[-w * 0.44, -d * 0.42], [w * 0.44, -d * 0.42], [-w * 0.44, d * 0.42], [w * 0.44, d * 0.42], [-w * 0.44, 0], [w * 0.44, 0]]) {
+          localS("box", bx, 0.08, bz, 0, 0, 0, 0.36, 0.12, 0.52, [0.22, 0.24, 0.27, 1], 0, MAT.DEFAULT);
         }
       } else if (s.type === "coop_mobile" || s.type === "coop_fixed") {
         const lift = s.type === "coop_mobile" ? 0.32 : 0.06;
@@ -1568,8 +1630,10 @@ export class Farm3DEngine {
         }
       }
 
-      this.hitBoxes.push({ kind: "structure", id: s.id, label: s.label, x: s.x, z: s.z, w, d, y0: sy, y1: sy + Math.max(0.8, h), data: s });
-      if (s.type !== "path_dirt" && s.type !== "road_paved" && s.type !== "river_seg") {
+      const effW = Math.abs(cosR) * w + Math.abs(sinR) * d;
+      const effD = Math.abs(sinR) * w + Math.abs(cosR) * d;
+      this.hitBoxes.push({ kind: "structure", id: s.id, label: s.label, x: s.x, z: s.z, w: effW, d: effD, y0: sy, y1: sy + Math.max(0.8, h), data: s });
+      if (s.type !== "path_dirt" && s.type !== "road_paved" && s.type !== "river_seg" && s.type !== "tarp_pad") {
         addArPin(s.id, s.label, s.x, sy + h + 0.5, s.z, false);
       }
     }
@@ -1578,6 +1642,9 @@ export class Farm3DEngine {
     const coopStruct = state.structures.find((s) => s.type === "coop_mobile" || s.type === "coop_fixed");
     const padStruct = state.structures.find((s) => s.type === "paddock") || state.structures.find((s) => s.type === "barn_livestock");
     const pondStruct = state.structures.find((s) => s.type === "pond");
+    const poultryPad = coopStruct && !state.livestock.some((l) => l.kind === "elevage")
+      ? state.structures.find((s) => s.type === "paddock" && Math.hypot(s.x - coopStruct.x, s.z - coopStruct.z) < 6.5)
+      : null;
 
     state.livestock.forEach((lot, lotIdx) => {
       const spId = lot.speciesId || (lot.kind === "ponte" ? "ponte" : "bovin_lait");
@@ -1585,7 +1652,12 @@ export class Farm3DEngine {
       let centerZ = 7;
       let spanX = 3.2, spanZ = 2.2;
 
-      if (spId === "ponte" && coopStruct) {
+      if (spId === "ponte" && poultryPad) {
+        centerX = poultryPad.x;
+        centerZ = poultryPad.z;
+        spanX = Math.max(0.7, (poultryPad.w || 3) * 0.34);
+        spanZ = Math.max(0.7, (poultryPad.d || 3.2) * 0.34);
+      } else if (spId === "ponte" && coopStruct) {
         centerX = coopStruct.x;
         centerZ = coopStruct.z + 1.5;
         spanX = 2.0; spanZ = 0.8;
@@ -1718,6 +1790,21 @@ export class Farm3DEngine {
           locG("box", mx, 0.02, d * 0.5, 0, 0, 0, 0.09, 2.22, 0.09, [0.78, 0.82, 0.86, 1], 0, MAT.METAL);
           locG("box", mx, 0.02, -d * 0.5, 0, 0, 0, 0.09, 2.22, 0.09, [0.78, 0.82, 0.86, 1], 0, MAT.METAL);
         }
+      } else if (g.biTunnel) {
+        // Bi-tunnel double voute accolee avec cheneau central (serre maraichere teintee vert)
+        const bayD = d * 0.5;
+        const biTint = this.overlay === "disease" && g.diseaseRisk > 35
+          ? [0.95, 0.35, 0.35, 0.38]
+          : [0.66, 0.88, 0.80, 0.36];
+        for (const bz of [-bayD * 0.5, bayD * 0.5]) {
+          locG("arch", 0, 0.02, bz, 0, Math.PI / 2, 0, bayD, 2.75, w, biTint, ghEm, MAT.GLASS);
+          for (let r = 0; r < 5; r++) {
+            const rx = ((r / 4) - 0.5) * (w * 0.96);
+            locG("archRib", rx, 0.02, bz, 0, Math.PI / 2, 0, bayD + 0.04, 2.78, 0.08, [0.75, 0.79, 0.83, 1], 0, MAT.METAL);
+          }
+          locG("cyl", w * 0.5, 2.74, bz, 0, 0, Math.PI / 2, 0.06, w, 0.06, [0.75, 0.79, 0.83, 1], 0, MAT.METAL);
+        }
+        locG("box", 0, 0.06, 0, 0, 0, 0, w, 0.14, 0.14, [0.72, 0.76, 0.8, 1], 0, MAT.METAL);
       } else {
         // Serre tunnel courbe avec arceaux galvanises visibles
         locG("arch", 0, 0.02, 0, 0, Math.PI / 2, 0, d, 2.95, w, tint, ghEm, MAT.GLASS);

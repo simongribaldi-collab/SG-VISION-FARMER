@@ -25,6 +25,18 @@ export const ANIMAL_SPECIES = [
 
 export const CLIMATE_LOCATIONS = [
   {
+    id: "granges_beaumont",
+    name: "Granges-les-Beaumont / Plaine de l'Isère (Drôme)",
+    lat: 45.051,
+    lon: 4.983,
+    climate: "Plaine de l'Isère / Drôme (Mistral & Étés chauds)",
+    avgTemp: [4.6, 6.0, 10.0, 13.2, 17.3, 21.4, 24.1, 23.6, 19.3, 14.6, 8.8, 5.3],
+    rainMm: [58, 49, 54, 76, 84, 59, 44, 57, 99, 114, 88, 60],
+    solarKwhM2: [1.7, 2.6, 4.0, 5.0, 5.8, 6.5, 6.8, 5.9, 4.5, 3.0, 1.8, 1.4],
+    windBase: 18,
+    rhBase: 65,
+  },
+  {
     id: "drome",
     name: "Valence / Drôme Provençale",
     lat: 44.93,
@@ -640,11 +652,14 @@ export const BUILDING_CATALOG = [
   { type: "farm_house", label: "Maison de Ferme / Habitation", icon: "🏡", w: 7.5, d: 5.5, h: 4.5, color: "#dfd3c3", category: "corps_ferme", cost: 28000 },
   { type: "stone_barn", label: "Grange Ancienne en Pierre", icon: "🏚️", w: 9, d: 5.5, h: 4.6, color: "#b8a99a", category: "corps_ferme", cost: 22000 },
   { type: "farm_shop", label: "Boutique Vente à la Ferme", icon: "🏪", w: 5.5, d: 4, h: 3.2, color: "#fcd34d", category: "corps_ferme", cost: 8500 },
+  { type: "locker_kiosk", label: "Casiers Fermiers 24h/24 (D532)", icon: "🗄️", w: 4.2, d: 2.2, h: 2.6, color: "#16a34a", category: "corps_ferme", cost: 12000 },
+  { type: "conserverie_coldroom", label: "Chambre Froide 17 m² & Conserverie", icon: "🥫", w: 5.2, d: 3.4, h: 3.2, color: "#e2e8f0", category: "corps_ferme", cost: 18500 },
   { type: "hangar", label: "Hangar Matériel & Chambre Froide", icon: "🏭", w: 8, d: 5.5, h: 4.0, color: "#64748b", category: "corps_ferme", cost: 12000 },
   { type: "grain_silo", label: "Silo à Grains Métallique", icon: "🛢️", w: 3.2, d: 3.2, h: 6.8, color: "#cbd5e1", category: "corps_ferme", cost: 7200 },
 
   // Cultures & Serres
   { type: "bed_open", label: "Planche Plein Champ", icon: "🥬", w: 7, d: 2.2, h: 0.4, color: "#5c4033", category: "culture", cost: 220 },
+  { type: "tarp_pad", label: "Aire Bâchée / Solarisation & Pépinière", icon: "⬜", w: 4.0, d: 8.4, h: 0.08, color: "#f1f5f9", category: "culture", cost: 900 },
   { type: "greenhouse", label: "Serre Tunnel / Chapelle", icon: "⛺", w: 8.5, d: 4.2, h: 3.1, color: "#7dd3fc", category: "culture", cost: 4800 },
   { type: "glass_house", label: "Serre Verre Multi-Chapelles", icon: "🪟", w: 10, d: 7, h: 3.8, color: "#bae6fd", category: "culture", cost: 16500 },
 
@@ -675,6 +690,7 @@ export const BUILDING_CATALOG = [
 ];
 
 export const TERRAIN_PRESETS = [
+  { id: "plaine_isere", label: "🌾 Plaine de l'Isère (Granges-les-Beaumont)" },
   { id: "valley_river", label: "🏞️ Vallon & Rivière (Réaliste)" },
   { id: "hillside", label: "⛰️ Coteau & Terrasses (Drôme/Ardèche)" },
   { id: "bocage_rolling", label: "🌳 Collines Douces du Bocage" },
@@ -689,7 +705,10 @@ export function generateTerrainHeights(presetId = "valley_river", res = 32) {
       const nz = (gz / res) * 2 - 1;
       let h = 0;
 
-      if (presetId === "hillside") {
+      if (presetId === "plaine_isere") {
+        // Plaine alluviale douce de la vallee de l'Isere (+/- 0.08m sur les parcelles)
+        h = Math.sin(nx * 1.8) * Math.cos(nz * 1.6) * 0.08 + Math.max(0, Math.hypot(nx, nz) - 0.72) * 0.25;
+      } else if (presetId === "hillside") {
         // Coteau montant vers le nord-ouest + replat central progressif pour le corps de ferme
         const raw = (-nz * 2.2 - nx * 0.9) + Math.sin(nx * 3.2) * 0.35;
         const r = Math.hypot(nx, nz);
@@ -729,12 +748,96 @@ export const TROPHIES_DEF = [
 ];
 
 export const SCALE_PRESETS = [
+  { id: "granges_beaumont", label: "🌱 Projet Reprise Granges-les-Beaumont (1,65 ha · ZE 309+375)", desc: "Parcelles ZE 309 (1,39 ha) + ZE 375 (26,65 a), 7 serres/bi-tunnels, plein champ, hangar + chambre froide 17 m² + conserverie, 249 poules bio & casiers D532." },
   { id: "micro", label: "Micro-Ferme Bio-Intensive (0,4 ha)", desc: "Corps de ferme pierre, planches 80cm, tunnels, poules & canards coureurs, rivière & haies." },
   { id: "maraichage_serre", label: "Domaine Maraîchage, Serres & Élevage (3,5 ha)", desc: "Corps de ferme en U, plein champ, serres chapelles, rivière avec pont, vaches, moutons & poules." },
   { id: "polyculture", label: "Polyculture, Élevage & Ponte du Bocage (28 ha)", desc: "Grand corps de ferme, grange pierre, silos, vaches laitières, brebis, cochons plein air & 1 200 poules." },
   { id: "grande", label: "Grande Exploitation Connectée (140 ha)", desc: "Blé, maïs, tournesol, vigne, silos, flotte RTK autonome, centrale agrivoltaïque & éolienne." },
   { id: "sandbox", label: "Terrain Vierge / Mode Scan Vidéo 3D", desc: "Terrain prêt à être sculpté ou généré en filmant votre ferme." },
 ];
+
+export function computeGrangesFinancialPlan({ deferred24m = true } = {}) {
+  const pmt = (rYr, nYr, prin) => {
+    const r = rYr / 12.0;
+    const n = nYr * 12;
+    return (prin * (r * Math.pow(1 + r, n))) / (Math.pow(1 + r, n) - 1);
+  };
+
+  const P = 185116.0;
+  const annNoDef = pmt(0.04, 20, P) * 12; // 13 461.20
+  const annDefInt = P * 0.04; // 7 404.64
+  const annDefPost = pmt(0.04, 18, P) * 12; // 14 443.44
+  const phAnn = 3750.0;
+  const msaBase = 0.3;
+
+  const schedule = [
+    { yr: 2028, ca: 55000.0, ebe: 22000.0, bank: deferred24m ? annDefInt : annNoDef, ph: 0.0, exo: 0.65 },
+    { yr: 2029, ca: 91900.0, ebe: 45566.666667, bank: deferred24m ? annDefInt : annNoDef, ph: phAnn, exo: 0.55 },
+    { yr: 2030, ca: 123900.0, ebe: 61500.0, bank: deferred24m ? annDefPost : annNoDef, ph: phAnn, exo: 0.35 },
+    { yr: 2031, ca: 135900.0, ebe: 67100.0, bank: deferred24m ? annDefPost : annNoDef, ph: phAnn, exo: 0.25 },
+    { yr: 2032, ca: 135900.0, ebe: 67100.0, bank: deferred24m ? annDefPost : annNoDef, ph: phAnn, exo: 0.15 },
+    { yr: 2033, ca: 135900.0, ebe: 67100.0, bank: deferred24m ? annDefPost : annNoDef, ph: 0.0, exo: 0.0 },
+  ];
+
+  const rows = schedule.map((it) => {
+    const disp = it.ebe - it.bank - it.ph;
+    const msaR = msaBase * (1.0 - it.exo);
+    const msa = disp * msaR;
+    const netAvIr = disp - msa;
+    const irAbat = it.yr <= 2032 ? 0.75 : 0.0;
+    const ir11 = netAvIr * (1.0 - irAbat) * 0.11;
+    const netApIr = netAvIr - ir11;
+    return {
+      yr: it.yr,
+      exoPct: Math.round(it.exo * 100),
+      ca: Math.round(it.ca),
+      ebe: Math.round(it.ebe),
+      dettePh: Math.round(it.bank + it.ph),
+      msa: Math.round(msa),
+      netAvIrAn: Math.round(netAvIr),
+      netAvIrM: Math.round(netAvIr / 12.0),
+      ir11: Math.round(ir11),
+      netApIrAn: Math.round(netApIr),
+      netApIrM: Math.round(netApIr / 12.0),
+      _exactNetAvIr: netAvIr,
+      _exactNetApIr: netApIr,
+    };
+  });
+
+  const are60 = 17883.0;
+  const tot2829AvIr = rows[0]._exactNetAvIr + rows[1]._exactNetAvIr + are60;
+  const tot2829ApIr = rows[0]._exactNetApIr + rows[1]._exactNetApIr + are60;
+  const annPost = deferred24m ? annDefPost : annNoDef;
+  const prudentEbe = 29000.0;
+
+  return {
+    principalEur: P,
+    deferred24m,
+    monthly2829: Math.round((deferred24m ? annDefInt : annNoDef) / 12),
+    annual2829: Math.round(deferred24m ? annDefInt : annNoDef),
+    monthlyPost: Math.round(annPost / 12),
+    annualPost: Math.round(annPost),
+    annualWithPh: Math.round(annPost + phAnn),
+    netDeferredCostEur: deferred24m ? 3608 : 0,
+    coverageNoPh: Number((prudentEbe / annPost).toFixed(2)),
+    coverageWithPh: Number((prudentEbe / (annPost + phAnn)).toFixed(2)),
+    minSellerEbeNoPh: Math.round(annPost * 2),
+    minSellerEbeWithPh: Math.round((annPost + phAnn) * 2),
+    are60Eur: are60,
+    target2829Eur: 72000,
+    tot2829AvIrEur: Math.round(tot2829AvIr),
+    tot2829AvIrMonthly: Math.round(tot2829AvIr / 24),
+    gap2829AvIrEur: Math.round(tot2829AvIr - 72000),
+    tot2829ApIrEur: Math.round(tot2829ApIr),
+    tot2829ApIrMonthly: Math.round(tot2829ApIr / 24),
+    gap2829ApIrEur: Math.round(tot2829ApIr - 72000),
+    smoothingCushionEur: Math.round(72000 - tot2829ApIr),
+    cruiseCaEur: 135900,
+    cruiseCaPerHaEur: Math.round(135900 / 1.65),
+    cruiseEbeMarginPct: Number(((67100 / 135900) * 100).toFixed(1)),
+    rows,
+  };
+}
 
 function makeHistory(prev1, prev2) {
   return [
@@ -743,22 +846,614 @@ function makeHistory(prev1, prev2) {
   ];
 }
 
-export function buildPresetState(presetId = "maraichage_serre") {
+function buildGrangesBeaumontState(scaleMeta, loc, terrain, forecast7) {
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+  const cadastralParcels = [
+    {
+      id: "ZE 375",
+      label: "ZE 375 (26,65 a)",
+      areaText: "26,65 a",
+      color: "#eab308",
+      points: [
+        [-20.6, -16.8],
+        [-14.7, -16.3],
+        [-16.3, 8.6],
+        [-21.3, 7.8],
+      ],
+    },
+    {
+      id: "ZE 309",
+      label: "ZE 309 (1,39 ha)",
+      areaText: "1,39 ha",
+      color: "#eab308",
+      points: [
+        [-14.7, -16.3],
+        [5.4, -14.8],
+        [5.2, -10.5],
+        [11.9, -9.8],
+        [12.1, 1.2],
+        [16.2, 2.2],
+        [15.4, 9.2],
+        [13.4, 16.0],
+        [-16.3, 8.6],
+      ],
+    },
+  ];
+
+  // 12 parcelles/abris orientes Nord-Sud (rot: Math.PI / 2) fideles aux photos satellite ZE 375 + ZE 309
+  const plots = [
+    {
+      id: "S1",
+      name: "ZE 375 — Bi-Tunnel Nord (Tomates Cœur)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      biTunnel: true,
+      x: -17.6, z: -9.5, w: 11.2, d: 4.2, rot: Math.PI / 2,
+      areaM2: 750,
+      soilType: "Limono-sableux alluvions",
+      ph: 6.7, omPct: 5.8,
+      cropId: "tomate",
+      plantedDayOffset: -42, gddAccumulated: 910,
+      stage: "Maturité / Récolte proche",
+      moisturePct: 60, healthPct: 91, diseaseRisk: 28,
+      irrigationValveOpen: false,
+      ventOpeningPct: 45, shadeScreenPct: 0,
+      indoorTempC: 24.4, indoorRhPct: 71, co2Ppm: 455,
+      history: makeHistory("epinard", "laitue"),
+    },
+    {
+      id: "P1",
+      name: "ZE 309 — Plein Champ NO (Carottes)",
+      zone: "Plein champ",
+      x: -12.0, z: -8.6, w: 11.2, d: 3.0, rot: Math.PI / 2,
+      areaM2: 1850,
+      soilType: "Limono-argileux",
+      ph: 6.8, omPct: 4.4,
+      cropId: "carotte",
+      plantedDayOffset: -36, gddAccumulated: 540,
+      stage: "Croissance", moisturePct: 57, healthPct: 92, diseaseRisk: 14,
+      irrigationValveOpen: false,
+      history: makeHistory("laitue", "haricot"),
+    },
+    {
+      id: "P2",
+      name: "ZE 309 — Plein Champ N-Centre (Laitues)",
+      zone: "Plein champ",
+      x: -8.6, z: -8.6, w: 11.2, d: 2.8, rot: Math.PI / 2,
+      areaM2: 1650,
+      soilType: "Limoneux",
+      ph: 6.9, omPct: 4.3,
+      cropId: "laitue",
+      plantedDayOffset: -28, gddAccumulated: 410,
+      stage: "Pommaison", moisturePct: 37, healthPct: 90, diseaseRisk: 18,
+      irrigationValveOpen: false,
+      history: makeHistory("poireau", "courgette"),
+    },
+    {
+      id: "S2",
+      name: "ZE 309 — Grand Tunnel Nord 1 (Courgettes)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      x: -5.1, z: -8.5, w: 11.2, d: 2.5, rot: Math.PI / 2,
+      areaM2: 460,
+      soilType: "Amendé compost",
+      ph: 6.7, omPct: 5.9,
+      cropId: "courgette",
+      plantedDayOffset: -34, gddAccumulated: 620,
+      stage: "Récolte active", moisturePct: 62, healthPct: 93, diseaseRisk: 20,
+      irrigationValveOpen: false,
+      ventOpeningPct: 50, shadeScreenPct: 0,
+      indoorTempC: 23.8, indoorRhPct: 68, co2Ppm: 440,
+      history: makeHistory("radis", "epinard"),
+    },
+    {
+      id: "S3",
+      name: "ZE 309 — Grand Tunnel Nord 2 (Tomates Conserverie)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      x: -2.2, z: -8.5, w: 11.2, d: 2.5, rot: Math.PI / 2,
+      areaM2: 460,
+      soilType: "Amendé compost",
+      ph: 6.6, omPct: 6.1,
+      cropId: "tomate",
+      plantedDayOffset: -46, gddAccumulated: 940,
+      stage: "Maturité / Transformation", moisturePct: 58, healthPct: 90, diseaseRisk: 30,
+      irrigationValveOpen: false,
+      ventOpeningPct: 40, shadeScreenPct: 0,
+      indoorTempC: 24.9, indoorRhPct: 73, co2Ppm: 460,
+      history: makeHistory("laitue", "haricot"),
+    },
+    {
+      id: "P3",
+      name: "ZE 309 — Plein Champ NE (Poireaux)",
+      zone: "Plein champ",
+      x: 0.7, z: -8.3, w: 10.6, d: 2.4, rot: Math.PI / 2,
+      areaM2: 1450,
+      soilType: "Limono-argileux",
+      ph: 6.8, omPct: 4.1,
+      cropId: "poireau",
+      plantedDayOffset: -52, gddAccumulated: 780,
+      stage: "Croissance haute", moisturePct: 59, healthPct: 91, diseaseRisk: 15,
+      irrigationValveOpen: false,
+      history: makeHistory("carotte", "chou"),
+    },
+    {
+      id: "S4",
+      name: "ZE 309 — Tunnel Nord-Est (Aubergines)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      x: 3.5, z: -8.0, w: 10.0, d: 2.4, rot: Math.PI / 2,
+      areaM2: 420,
+      soilType: "Amendé compost",
+      ph: 6.7, omPct: 5.5,
+      cropId: "aubergine",
+      plantedDayOffset: -40, gddAccumulated: 740,
+      stage: "Fructification", moisturePct: 61, healthPct: 92, diseaseRisk: 21,
+      irrigationValveOpen: false,
+      ventOpeningPct: 45, shadeScreenPct: 0,
+      indoorTempC: 25.1, indoorRhPct: 69, co2Ppm: 445,
+      history: makeHistory("epinard", "radis"),
+    },
+    {
+      id: "S5",
+      name: "ZE 309 — Bi-Tunnel Sud-Ouest (Fraises Confitures)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      biTunnel: true,
+      x: -13.8, z: 4.8, w: 8.2, d: 4.0, rot: Math.PI / 2,
+      areaM2: 680,
+      soilType: "Sablo-limoneux",
+      ph: 6.4, omPct: 5.4,
+      cropId: "fraise",
+      plantedDayOffset: -48, gddAccumulated: 700,
+      stage: "Fructification", moisturePct: 64, healthPct: 94, diseaseRisk: 17,
+      irrigationValveOpen: false,
+      ventOpeningPct: 50, shadeScreenPct: 0,
+      indoorTempC: 23.0, indoorRhPct: 66, co2Ppm: 430,
+      history: makeHistory("radis", "haricot"),
+    },
+    {
+      id: "P4",
+      name: "ZE 309 — Plein Champ SO (Choux)",
+      zone: "Plein champ",
+      x: -9.5, z: 5.0, w: 8.2, d: 3.0, rot: Math.PI / 2,
+      areaM2: 1750,
+      soilType: "Argilo-calcaire",
+      ph: 7.0, omPct: 4.2,
+      cropId: "chou",
+      plantedDayOffset: -38, gddAccumulated: 580,
+      stage: "Croissance foliaire", moisturePct: 55, healthPct: 90, diseaseRisk: 16,
+      irrigationValveOpen: false,
+      history: makeHistory("haricot", "pomme_de_terre"),
+    },
+    {
+      id: "S6",
+      name: "ZE 309 — Tunnel Sud-Centre 1 (Haricots Verts)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      x: -6.1, z: 5.1, w: 6.8, d: 2.2, rot: Math.PI / 2,
+      areaM2: 320,
+      soilType: "Limono-sableux",
+      ph: 6.6, omPct: 5.0,
+      cropId: "haricot",
+      plantedDayOffset: -32, gddAccumulated: 560,
+      stage: "Floraison / Gousses", moisturePct: 60, healthPct: 93, diseaseRisk: 14,
+      irrigationValveOpen: false,
+      ventOpeningPct: 55, shadeScreenPct: 0,
+      indoorTempC: 22.8, indoorRhPct: 64, co2Ppm: 425,
+      history: makeHistory("laitue", "carotte"),
+    },
+    {
+      id: "S7",
+      name: "ZE 309 — Tunnel Sud-Centre 2 (Épinards)",
+      zone: "Serre",
+      structureStyle: "greenhouse",
+      x: -3.5, z: 5.1, w: 6.8, d: 2.2, rot: Math.PI / 2,
+      areaM2: 320,
+      soilType: "Limoneux",
+      ph: 6.7, omPct: 5.2,
+      cropId: "epinard",
+      plantedDayOffset: -24, gddAccumulated: 360,
+      stage: "Récolte jeunes pousses", moisturePct: 63, healthPct: 94, diseaseRisk: 19,
+      irrigationValveOpen: false,
+      ventOpeningPct: 60, shadeScreenPct: 0,
+      indoorTempC: 21.4, indoorRhPct: 68, co2Ppm: 420,
+      history: makeHistory("tomate", "courgette"),
+    },
+    {
+      id: "P5",
+      name: "ZE 309 — Plein Champ SE (Pommes de terre)",
+      zone: "Plein champ",
+      x: 0.4, z: 5.5, w: 8.6, d: 3.6, rot: Math.PI / 2,
+      areaM2: 2450,
+      soilType: "Limoneux profond",
+      ph: 6.5, omPct: 4.0,
+      cropId: "pomme_de_terre",
+      plantedDayOffset: -44, gddAccumulated: 710,
+      stage: "Tubérisation", moisturePct: 53, healthPct: 89, diseaseRisk: 21,
+      irrigationValveOpen: false,
+      history: makeHistory("engrais_vert", "poireau"),
+    },
+  ];
+
+  const structures = [
+    { id: "STR-TARP", type: "tarp_pad", label: "ZE 375 — Aire Bâchée & Solarisation", x: -18.5, z: 3.2, w: 4.0, d: 8.4, h: 0.08, rot: 0 },
+    { id: "STR-TRACK-C", type: "path_dirt", label: "Allée Centrale d'Exploitation", x: -6.5, z: -0.8, w: 21.0, d: 1.6, h: 0.08, rot: 0 },
+    { id: "STR-HANGAR", type: "hangar", lightRoof: true, label: "Grand Hangar Agricole, Matériel & Stockage", x: 8.6, z: 1.5, w: 14.2, d: 6.0, h: 4.4, rot: Math.PI / 2 },
+    { id: "STR-CONSERV", type: "conserverie_coldroom", label: "Chambre Froide 17 m² & Conserverie (Phase 1 -> 65 m²)", x: 8.6, z: 10.6, w: 5.2, d: 3.0, h: 3.2, rot: 0 },
+    { id: "STR-COOP", type: "coop_mobile", label: "Poulailler Bio 249 Poules Pondeuses", x: 13.7, z: 4.5, w: 3.4, d: 2.2, h: 2.1, rot: 0, doorOpen: true },
+    { id: "STR-PAD-POULES", type: "paddock", label: "Parcours Herbeux 249 Poules Bio", x: 13.3, z: 7.7, w: 3.0, d: 3.2, h: 0.25, rot: 0 },
+    { id: "STR-COUR", type: "path_dirt", label: "Cour Accès Chemin des Serres", x: 11.2, z: 13.0, w: 6.6, d: 2.2, h: 0.08, rot: 0.14 },
+    { id: "STR-LOCKERS", type: "locker_kiosk", label: "Casiers Fermiers 24h/24 (Angle D532 / Ch. des Serres)", x: 10.6, z: 14.8, w: 4.2, d: 2.2, h: 2.6, rot: -0.15 },
+    { id: "STR-D532", type: "road_paved", label: "D 532 — Rue du Tram", x: -2.0, z: 18.6, w: 42, d: 3.0, h: 0.1, rot: -0.15 },
+    { id: "STR-CH-SERRES", type: "road_paved", label: "Chemin des Serres", x: 18.2, z: 2.8, w: 38, d: 2.2, h: 0.1, rot: 1.24 },
+    { id: "STR-TANK", type: "water_tank", label: "Cuve Tampon Irrigation Serres", x: 4.2, z: -2.0, w: 1.8, d: 1.8, h: 3.0, rot: 0 },
+    { id: "STR-WELL", type: "well_pump", label: "Forage & Droits d'Eau Plaine", x: 4.2, z: 0.8, w: 1.6, d: 1.6, h: 2.2, rot: 0 },
+    { id: "STR-SOL", type: "solar_array", label: "Ombrière PV 12 kWc (Autoconso Frigo/Casiers)", x: 4.2, z: 5.2, w: 4.2, d: 2.2, h: 2.0, rot: Math.PI / 2, kwPeak: 12 },
+    { id: "STR-COMP", type: "compost", label: "Plateforme Compostage Maraîchage", x: 3.9, z: 8.0, w: 2.8, d: 1.8, h: 1.0, rot: 0 },
+    { id: "STR-WX", type: "weather_station", label: "Station Météo IoT Granges-les-Beaumont", x: 4.0, z: 10.6, w: 1.4, d: 1.4, h: 3.6, rot: 0 },
+    { id: "STR-HDG-N", type: "hedge_row", label: "Haie Brise-Vent Mistral Nord", x: -5.8, z: -17.4, w: 26, d: 1.2, h: 2.8, rot: 0 },
+  ];
+
+  const livestock = [
+    {
+      id: "LOT-POULES",
+      kind: "ponte",
+      speciesId: "ponte",
+      name: "Poules Pondeuses Bio (Atelier Ponte 69 000 œufs/an)",
+      species: "Poules pondeuses bio",
+      count: 249,
+      ageWeeks: 28,
+      layingRatePct: 76,
+      eggsToday: 189,
+      eggPriceUnit: 0.39,
+      feedGramsPerDay: 122,
+      waterLitersPerDay: 0.26,
+      welfarePct: 96,
+      doorOpen: true,
+      lightSchedule: "06:00 - 20:30",
+      paddockName: "Parcours Herbeux Est ZE 309",
+      coopStructureId: "STR-COOP",
+      parasiteRiskPct: 8,
+    },
+  ];
+
+  const equipment = [
+    {
+      id: "ROB-WEED",
+      name: "Rover Désherbeur Solaire R-01",
+      category: "Robot autonome",
+      autonomous: true,
+      kind: "rover",
+      status: "working",
+      batteryPct: 86,
+      hoursTotal: 118,
+      nextServiceHours: 400,
+      costPerHour: 2.4,
+      x: -12.0, z: -8.6, targetX: -12.0, targetZ: -8.6,
+      targetPlotId: "P1",
+      task: "Binage inter-rang P1 (Carottes)",
+    },
+    {
+      id: "ROB-DRONE",
+      name: "Drone NDVI & Thermique D-02",
+      category: "Robot autonome",
+      autonomous: true,
+      kind: "drone",
+      status: "working",
+      batteryPct: 79,
+      hoursTotal: 46,
+      nextServiceHours: 150,
+      costPerHour: 4.0,
+      x: -17.6, z: -9.5, targetX: -17.6, targetZ: -9.5,
+      targetPlotId: "S1",
+      task: "Surveillance serres & hygrométrie S1",
+    },
+    {
+      id: "EQ-TRACT-MF",
+      name: "Tracteur Maraîcher 55cv (Reprise)",
+      category: "Engin non-autonome",
+      autonomous: false,
+      kind: "manual",
+      status: "available",
+      batteryPct: 100,
+      fuelPct: 74,
+      hoursTotal: 1850,
+      nextServiceHours: 2000,
+      costPerHour: 22,
+      task: "Travail du sol & planches plein champ",
+    },
+    {
+      id: "EQ-MOTO",
+      name: "Motoculteur + Herse rotative",
+      category: "Outil non-autonome",
+      autonomous: false,
+      kind: "manual",
+      status: "available",
+      batteryPct: 100,
+      fuelPct: 85,
+      hoursTotal: 290,
+      nextServiceHours: 450,
+      costPerHour: 9,
+      task: "Préparation lits de semences sous abris",
+    },
+    {
+      id: "EQ-SEMOIR",
+      name: "Semoir maraîcher de précision 4 rangs",
+      category: "Outil attelé",
+      autonomous: false,
+      kind: "manual",
+      status: "available",
+      batteryPct: 100,
+      hoursTotal: 140,
+      nextServiceHours: 400,
+      costPerHour: 5,
+      task: "Semis carottes, radis & épinards",
+    },
+    {
+      id: "EQ-AUTOCLAVE",
+      name: "Autoclave Léger Conserverie (Saison 1)",
+      category: "Transformation HACCP",
+      autonomous: false,
+      kind: "manual",
+      status: "available",
+      batteryPct: 100,
+      hoursTotal: 22,
+      nextServiceHours: 500,
+      costPerHour: 6.5,
+      task: "Stérilisation sauce tomate & confitures anti-gaspi",
+    },
+  ];
+
+  const resources = [
+    { id: "RES-EAU", name: "Forage Plaine + Cuve Tampon Irrigation", category: "Eau", unit: "m³", stock: 260, max: 350, dailyUse: 7.5, unitCost: 0.35, reorderPoint: 70 },
+    { id: "RES-ELEC", name: "Ombrière PV 12 kWc & Frigo 17 m²", category: "Électricité", unit: "kWh", stock: 42, max: 60, dailyUse: 24, unitCost: 0.21, reorderPoint: 15 },
+    { id: "RES-SEM", name: "Stock Semences, Plants & Mottes Bio", category: "Semences", unit: "doses", stock: 210, max: 320, dailyUse: 3.4, unitCost: 1.85, reorderPoint: 45 },
+    { id: "RES-ALIM-P", name: "Aliment Poules Pondeuses Bio (122 g/j × 249)", category: "Alimentation", unit: "kg", stock: 920, max: 1500, dailyUse: 30.4, unitCost: 0.62, reorderPoint: 200 },
+    { id: "RES-AGRO", name: "Bocaux Conserverie, Paillage & Biocontrôle", category: "Agrofourniture", unit: "unités", stock: 340, max: 600, dailyUse: 4.5, unitCost: 1.9, reorderPoint: 80 },
+    { id: "RES-GNR", name: "Carburant GNR / Huiles Tracteur", category: "Énergie fossile", unit: "L", stock: 240, max: 400, dailyUse: 4.2, unitCost: 1.38, reorderPoint: 75 },
+  ];
+
+  const automations = [
+    {
+      id: "AUT-1",
+      name: "Irrigation auto stress hydrique (< 38 %)",
+      enabled: true,
+      condition: { sensor: "plot_min_moisture", op: "<", value: 38, noRainNext12h: true },
+      action: { type: "irrigate_dry_plots", durationMin: 25 },
+      lastTriggered: null,
+      triggerCount: 2,
+    },
+    {
+      id: "AUT-2",
+      name: "Aération serres anti-botrytis (> 27 °C)",
+      enabled: true,
+      condition: { sensor: "greenhouse_temp", op: ">", value: 27 },
+      action: { type: "open_vents", pct: 80 },
+      lastTriggered: null,
+      triggerCount: 4,
+    },
+    {
+      id: "AUT-3",
+      name: "Sécurité Mistral fort (> 45 km/h)",
+      enabled: true,
+      condition: { sensor: "wind_kmh", op: ">", value: 45 },
+      action: { type: "storm_protect" },
+      lastTriggered: null,
+      triggerCount: 0,
+    },
+    {
+      id: "AUT-4",
+      name: "Trappe poulailler 249 poules (aube / crépuscule)",
+      enabled: true,
+      condition: { sensor: "night_time", op: "==", value: 1 },
+      action: { type: "coop_door_auto" },
+      lastTriggered: null,
+      triggerCount: 12,
+    },
+    {
+      id: "AUT-5",
+      name: "Binage Rover sur planche sèche/enherbée",
+      enabled: true,
+      condition: { sensor: "rover_idle_battery", op: ">", value: 60 },
+      action: { type: "dispatch_rover", plotId: "P2" },
+      lastTriggered: null,
+      triggerCount: 1,
+    },
+  ];
+
+  const staff = [
+    { id: "ST-1", name: "Simon Gribaldi (Chef d'exploitation EARL)", role: "Pilotage, Maraîchage, Ponte & Marchés", weeklyHours: 45, hourlyCost: 22 },
+  ];
+
+  const projectPlan = {
+    identity: {
+      farmLabel: "Ferme maraîchère en production — Granges-les-Beaumont (Drôme)",
+      cadastralSummary: "ZE 309 (1,39 ha) + ZE 375 (26,65 a) = 1,65 ha · Chambre froide 17 m²",
+      saferTargetPriceEur: 195000,
+      saferHardCeilingEur: 200000,
+      saferListedPriceRejectedEur: 235000,
+      legalStructure: "EARL à l'IR (abattement JA 75 % CGI art. 73 B sur 5 ans)",
+      departureStrategy: "Rupture conventionnelle au 31 déc. 2027 — Prise de poste ferme 1er janv. 2028",
+    },
+    financing: {
+      totalNeedsEur: 213500,
+      totalResourcesEur: 223200,
+      netCashJan2028Eur: 9700,
+      rows: [
+        { label: "Prix d'achat négocié SAFER (acte EARL)", besoin: 195000, ressource: 0 },
+        { label: "Investissements initiaux Saison 1 (remise en état + autoclave léger)", besoin: 18500, ressource: 0 },
+        { label: "Apport personnel en CCA (indemnité rupture 7 684 € + épargne 2 200 €)", besoin: 0, ressource: 9884 },
+        { label: "Prêt bancaire EARL (4,0 % sur 20 ans, différé 24 m : 2 + 18 ans)", besoin: 0, ressource: 185116 },
+        { label: "Prêt d'honneur Initiative Drôme Ardèche (0 %, différé 12 m, 48 × 312,50 €)", besoin: 0, ressource: 15000 },
+        { label: "Acompte DJA (60 %, encaissé automne 2027)", besoin: 0, ressource: 13200 },
+      ],
+      phase2Bonus: [
+        "Solde DJA : +8 800 € (année 3–4)",
+        "Subvention régionale PCAE (25–35 %, ~11–13 000 €) : extension conserverie 65 m² + casiers sans nouvel emprunt",
+      ],
+    },
+    loan: {
+      principalEur: 185116,
+      ratePct: 4.0,
+      yearsTotal: 20,
+      deferred24m: true,
+    },
+    workshopsTarget2031: [
+      { id: "WS-MAR", name: "Maraîchage frais (abris + plein champ)", caEur: 50000, note: "S1..S7 + P1..P5 sur 1,65 ha" },
+      { id: "WS-OEUFS", name: "Œufs bio (249 poules · 69 000 œufs × 0,39 €)", caEur: 26900, note: "Soit 2,34 € les 6 (+6 900 € d'EBE pur vs 0,29 €)" },
+      { id: "WS-CASIERS", name: "Casiers 24h/24 (D532 + site déporté)", caEur: 20000, note: "≈ 55 €/jour sur Rue du Tram D532" },
+      { id: "WS-CONSERV", name: "Conserverie (sauce tomate, confitures, anti-gaspi)", caEur: 15000, note: "Marge 50–60 % · Extension 65 m² en Phase 2" },
+      { id: "WS-MARCHES", name: "Marchés (2 marchés/mois × 1 000 €)", caEur: 24000, note: "Alt. temps préservé : 1 marché + œufs 0,44 € + casiers 25 k€ = 132 350 € (3 082 €/m)" },
+    ],
+    barriers: [
+      { id: "BAR-1", label: "Prix signé ≤ 200 000 € (cible 195 000 €) & 3 derniers bilans vendeur confirmant EBE ≥ 28 887 € (hors PH) / 36 387 € (avec PH) et CA ≈ 55 000 €", checked: false },
+      { id: "BAR-2", label: "Cloisonnement patrimonial strict : prêt au nom de l'EARL uniquement ; zéro caution ni hypothèque sur les appartements personnels", checked: false },
+      { id: "BAR-3", label: "Clauses suspensives obligatoires avant acompte : obtention du prêt EARL + notification écrite DJA avant l'acte (EARL immatriculée)", checked: false },
+      { id: "BAR-4", label: "Sanctuarisation des +9 700 € de trésorerie initiale EARL et aucun logement de fonction avant 2032", checked: false },
+    ],
+    meetings: [
+      { id: "MTG-PAI", actor: "1. PAI Drôme (dès maintenant)", points: "Capacité pro Bac Pro Travaux Paysagers (2010) ; montant exact DJA plaine Drôme (20–24 k€) & échéancier 60/40 ou 80/20 ; calendrier PPP (6–12 m, limite 40 ans = avril 2029)", done: false },
+      { id: "MTG-SAFER", actor: "2. SAFER & Vendeur (avant offre)", points: "3 derniers bilans (CA, EBE, heures, ETP) ; âge/état bâches serres (remplacement 30–40 k€ = levier négo) ; cultures sur pied & date sortie ; clientèle, droits d'eau, baux & motif vente", done: false },
+      { id: "MTG-CER", actor: "3. Comptable agricole (CERFRANCE/AGC)", points: "Amortissements 2028 à l'IR (régularisation France Travail) ; TMI foyer ; arbitrage ARE 60 % (17 883 €) vs ARCE (17 883 €) ; déclaration DDCPP / HACCP conserverie Phase 1", done: false },
+      { id: "MTG-BANK", actor: "4. Banque (après bilans vendeur)", points: "Prêt 185 116 € / 20 ans à l'EARL avec différé 24 mois ; reconnaissance du PH 15 000 € en trésorerie ; zéro garantie sur l'immobilier personnel", done: false },
+    ],
+  };
+
+  const activities = ["maraichage_champ", "serre", "ponte", "agroforesterie", "energie"];
+
+  return {
+    version: 3,
+    farm: {
+      name: scaleMeta.name,
+      presetId: "granges_beaumont",
+      scale: scaleMeta.scale,
+      areaHa: scaleMeta.areaHa,
+      gridSize: scaleMeta.gridSize,
+      activities,
+      cadastralParcels,
+      location: {
+        id: loc.id,
+        name: loc.name,
+        lat: loc.lat,
+        lon: loc.lon,
+        climate: loc.climate,
+      },
+      gamification: {
+        xp: 620,
+        level: 6,
+        simulatedFutureUsed: false,
+      },
+    },
+    terrain,
+    simulation: {
+      dayOffset: 0,
+      hourOfDay: 10.5,
+      playingTimelapse: false,
+      scenario: "normal",
+    },
+    weather: {
+      source: "Station Locale Granges-les-Beaumont + Modèle Drôme",
+      lastSync: new Date().toISOString(),
+      current: {
+        tempC: forecast7[0].tempMax - 1.8,
+        rhPct: forecast7[0].rhAvgPct,
+        windKmh: forecast7[0].windMaxKmh,
+        rainMm: forecast7[0].rainMm,
+        solarWm2: Math.round(forecast7[0].solarKwhM2 * 145),
+        leafWetnessPct: forecast7[0].rhAvgPct > 78 ? 65 : 22,
+        pressureHpa: 1016,
+      },
+      forecast: forecast7,
+    },
+    plots,
+    structures,
+    livestock,
+    equipment,
+    resources,
+    automations,
+    staff,
+    projectPlan,
+    finances: {
+      cashBalance: 9700,
+      monthlyFixedCosts: 1450,
+      salesChannel: "Casiers D532 24h/24 + 2 Marchés/mois + Conserverie + Œufs Bio",
+      ledger: [
+        { id: "TX-INIT-1", date: "2028-01-01", type: "recette", atelier: "Financement", label: "Apport personnel CCA (rupture 7 684 € + épargne 2 200 €)", amount: 9884 },
+        { id: "TX-INIT-2", date: "2028-01-01", type: "recette", atelier: "Financement", label: "Prêt bancaire EARL (4,0 % · 20 ans · différé 24 m)", amount: 185116 },
+        { id: "TX-INIT-3", date: "2028-01-01", type: "recette", atelier: "Financement", label: "Prêt d'honneur Initiative Drôme Ardèche (0 % · 48 m)", amount: 15000 },
+        { id: "TX-INIT-4", date: "2027-10-15", type: "recette", atelier: "Aide DJA", label: "Acompte DJA 60 % (encaissé automne 2027)", amount: 13200 },
+        { id: "TX-INIT-5", date: "2028-01-01", type: "charge", atelier: "Acquisition SAFER", label: "Prix d'achat négocié ZE 309 + ZE 375 (1,65 ha + serres + CF 17 m²)", amount: -195000 },
+        { id: "TX-INIT-6", date: "2028-01-05", type: "charge", atelier: "Investissements S1", label: "Remise en état serres/parcelles + autoclave léger conserverie", amount: -18500 },
+      ],
+    },
+    productionLogs: [
+      { id: "PROD-1", date: yesterday, target: "S5 (Fraises Confitures)", qty: 42, unit: "kg", valueEur: 315 },
+      { id: "PROD-2", date: today, target: "Poulailler 249 Poules Bio", qty: 189, unit: "œufs", valueEur: 74 },
+    ],
+    diseaseLogs: [
+      { id: "DIS-1", date: today, target: "S1 — Bi-Tunnel Tomates ZE 375", diseaseId: "mildiou", severity: "Faible (prévention)", actionTaken: "Ouverture aérations 45 % + paillage propre" },
+    ],
+    hud: {
+      alerts: [
+        { id: "HUD-INIT-1", timestamp: new Date().toISOString(), severity: "warn", message: "ZE 309 Planche P2 (Laitues) humidité 37 % — arrosage ou binage recommandé" },
+        { id: "HUD-INIT-2", timestamp: new Date().toISOString(), severity: "info", message: "Projet Granges-les-Beaumont (1,65 ha) actif · Trésorerie 01/01/2028 : +9 700 €" },
+      ],
+      voiceHistory: [],
+    },
+    aiSettings: {
+      provider: "local",
+      ollamaUrl: "http://localhost:11434",
+      model: "mistral",
+      apiKey: "",
+    },
+  };
+}
+
+export function buildPresetState(presetId = "granges_beaumont") {
+  const isGranges = presetId === "granges_beaumont";
   const isMicro = presetId === "micro";
   const isPoly = presetId === "polyculture";
   const isLarge = presetId === "grande";
   const isSandbox = presetId === "sandbox";
 
   const scaleMeta = {
+    granges_beaumont: { scale: "moyenne", areaHa: 1.65, gridSize: 48, name: "Ferme Granges-les-Beaumont (ZE 309 + ZE 375)", locationId: "granges_beaumont", terrainPreset: "plaine_isere" },
     micro: { scale: "micro", areaHa: 0.4, gridSize: 38, name: "La Micro-Ferme des Sources", locationId: "drome", terrainPreset: "hillside" },
     maraichage_serre: { scale: "moyenne", areaHa: 3.5, gridSize: 44, name: "Domaine Val-Soleil & Corps de Ferme", locationId: "drome", terrainPreset: "valley_river" },
     polyculture: { scale: "moyenne_grande", areaHa: 28, gridSize: 48, name: "Ferme du Bocage & Élevage", locationId: "bretagne", terrainPreset: "bocage_rolling" },
     grande: { scale: "grande", areaHa: 140, gridSize: 54, name: "Exploitation Connectée Beauce-Horizon", locationId: "beauce", terrainPreset: "flat_plain" },
     sandbox: { scale: "moyenne", areaHa: 2.0, gridSize: 44, name: "Ferme 3D Personnalisée", locationId: "drome", terrainPreset: "valley_river" },
-  }[presetId] || { scale: "moyenne", areaHa: 3.5, gridSize: 44, name: "Domaine Val-Soleil & Corps de Ferme", locationId: "drome", terrainPreset: "valley_river" };
+  }[presetId] || { scale: "moyenne", areaHa: 1.65, gridSize: 48, name: "Ferme Granges-les-Beaumont (ZE 309 + ZE 375)", locationId: "granges_beaumont", terrainPreset: "plaine_isere" };
 
   const loc = CLIMATE_LOCATIONS.find((l) => l.id === scaleMeta.locationId) || CLIMATE_LOCATIONS[0];
   const terrain = generateTerrainHeights(scaleMeta.terrainPreset, 32);
+  const forecast7 = Array.from({ length: 14 }, (_, idx) => {
+    const month = new Date().getMonth();
+    const baseT = loc.avgTemp[month];
+    const wave = Math.sin(idx * 0.7) * 2.8;
+    const rain = idx === 3 || idx === 9 ? 11.5 : idx === 4 ? 4.2 : 0;
+    const wind = Math.round(loc.windBase + (idx === 6 ? 26 : Math.cos(idx) * 6));
+    const rh = Math.min(96, Math.max(38, Math.round(loc.rhBase + (rain > 0 ? 18 : -wave * 1.6))));
+    const solar = Number(Math.max(0.8, loc.solarKwhM2[month] * (rain > 0 ? 0.42 : 1.05)).toFixed(2));
+    return {
+      dayOffset: idx,
+      date: new Date(Date.now() + idx * 86400000).toISOString().slice(0, 10),
+      tempMin: Number((baseT - 4.2 + wave).toFixed(1)),
+      tempMax: Number((baseT + 5.8 + wave).toFixed(1)),
+      rainMm: rain,
+      windMaxKmh: Math.max(5, wind),
+      rhAvgPct: rh,
+      solarKwhM2: solar,
+      etpMm: Number(Math.max(0.6, 0.22 * (baseT + 5 + wave) * (1 - rh / 220)).toFixed(2)),
+    };
+  });
+
+  if (isGranges) {
+    return buildGrangesBeaumontState(scaleMeta, loc, terrain, forecast7);
+  }
 
   const activities = ["maraichage_champ", "serre", "ponte", "elevage", "agroforesterie", "energie"];
 
@@ -1189,27 +1884,6 @@ export function buildPresetState(presetId = "maraichage_serre") {
           { id: "ST-2", name: "Maraîcher / Soigneur Élevage", role: "Planches, Serre & Cheptel", weeklyHours: 35, hourlyCost: 18 },
           { id: "ST-3", name: "Saisonnier (Renfort pic)", role: "Semis & Récoltes", weeklyHours: 20, hourlyCost: 16 },
         ];
-
-  const forecast7 = Array.from({ length: 14 }, (_, idx) => {
-    const month = new Date().getMonth();
-    const baseT = loc.avgTemp[month];
-    const wave = Math.sin(idx * 0.7) * 2.8;
-    const rain = idx === 3 || idx === 9 ? 11.5 : idx === 4 ? 4.2 : 0;
-    const wind = Math.round(loc.windBase + (idx === 6 ? 26 : Math.cos(idx) * 6));
-    const rh = Math.min(96, Math.max(38, Math.round(loc.rhBase + (rain > 0 ? 18 : -wave * 1.6))));
-    const solar = Number(Math.max(0.8, loc.solarKwhM2[month] * (rain > 0 ? 0.42 : 1.05)).toFixed(2));
-    return {
-      dayOffset: idx,
-      date: new Date(Date.now() + idx * 86400000).toISOString().slice(0, 10),
-      tempMin: Number((baseT - 4.2 + wave).toFixed(1)),
-      tempMax: Number((baseT + 5.8 + wave).toFixed(1)),
-      rainMm: rain,
-      windMaxKmh: Math.max(5, wind),
-      rhAvgPct: rh,
-      solarKwhM2: solar,
-      etpMm: Number(Math.max(0.6, 0.22 * (baseT + 5 + wave) * (1 - rh / 220)).toFixed(2)),
-    };
-  });
 
   return {
     version: 3,

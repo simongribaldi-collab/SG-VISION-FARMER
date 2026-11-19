@@ -1,5 +1,194 @@
+import { computeGrangesFinancialPlan } from "../data/presets.js";
 import { getCropById, SCENARIOS, simulateFuture } from "../engine/predictor.js";
 import { esc, fmtEur, kpiCard, pill, renderLineChartSvg } from "./components.js";
+
+function renderProjectPlanSection(projectPlan) {
+  const deferred24m = projectPlan.loan?.deferred24m !== false;
+  const calc = computeGrangesFinancialPlan({ deferred24m });
+  const idInfo = projectPlan.identity || {};
+  const fin = projectPlan.financing || {};
+  const workshops = projectPlan.workshopsTarget2031 || [];
+  const barriers = projectPlan.barriers || [];
+  const meetings = projectPlan.meetings || [];
+
+  return `
+    <div class="card" style="margin-bottom:14px;border:1px solid rgba(234,179,8,0.45);background:linear-gradient(135deg, rgba(234,179,8,0.08), rgba(15,23,42,0.72));">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">📋 Dossier Reprise & Plan Financier — Granges-les-Beaumont (EARL à l'IR)</h3>
+          <div class="muted" style="font-size:12px;margin-top:3px;">
+            ${esc(idInfo.cadastralSummary || "ZE 309 + ZE 375 (1,65 ha)")} · ${esc(idInfo.legalStructure || "EARL à l'IR")} · Cible SAFER <strong>${fmtEur(idInfo.saferTargetPriceEur || 195000)}</strong> (plafond ≤ ${fmtEur(idInfo.saferHardCeilingEur || 200000)})
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          ${pill(`Trésorerie 01/01/2028 : +${fmtEur(fin.netCashJan2028Eur || 9700)}`, "ok")}
+          <select class="input" id="sel-loan-mode" style="width:270px;">
+            <option value="deferred" ${deferred24m ? "selected" : ""}>Prêt 185 116 € · Différé 24 m (2 + 18 ans) [Recommandé]</option>
+            <option value="nodef" ${!deferred24m ? "selected" : ""}>Alternative · Sans différé (20 ans linéaire)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid-4" style="margin-bottom:14px;">
+        ${kpiCard(
+          "Mensualité Prêt EARL (185 116 €)",
+          `${fmtEur(calc.monthly2829)} / m`,
+          deferred24m ? `2028–2029 intérêts seuls · puis ${fmtEur(calc.monthlyPost)}/m (2030–2047)` : `Linéaire 20 ans · ${fmtEur(calc.annualPost)}/an`,
+          "ok"
+        )}
+        ${kpiCard(
+          "Couverture Bancaire (EBE 29 000 €)",
+          `${calc.coverageNoPh} (hors PH) / ${calc.coverageWithPh} (avec PH)`,
+          `Seuil EBE vendeur ratio ≥ 2 : ${fmtEur(calc.minSellerEbeNoPh)} / ${fmtEur(calc.minSellerEbeWithPh)}`,
+          calc.coverageNoPh >= 2.0 ? "ok" : "warn"
+        )}
+        ${kpiCard(
+          "Croisière 2031–2033 (1,65 ha)",
+          `${fmtEur(calc.cruiseCaEur)} CA`,
+          `${calc.cruiseCaPerHaEur.toLocaleString("fr-FR")} €/ha · Marge EBE ${calc.cruiseEbeMarginPct} % · Coût différé ${fmtEur(calc.netDeferredCostEur)}`,
+          "ok"
+        )}
+        ${kpiCard(
+          "Transition 2028–2029 (+ARE 60 %)",
+          `${fmtEur(calc.tot2829ApIrEur)} nets ap. IR`,
+          `${fmtEur(calc.tot2829AvIrEur)} av. IR (${calc.tot2829AvIrMonthly.toLocaleString("fr-FR")} €/m) · Lissage ~${fmtEur(calc.smoothingCushionEur)} vs 72 000 €`,
+          "warn"
+        )}
+      </div>
+
+      <div class="grid-2" style="margin-bottom:14px;">
+        <div class="card">
+          <div class="card-header">
+            <h4 class="card-title">📅 Trajectoire Revenu Net « Cap 3 000 €/mois » (2028–2033)</h4>
+            ${pill(deferred24m ? "Option Différé 24 m (2+18)" : "Option Sans différé (20 ans)", "ok")}
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Année</th><th>CA</th><th>EBE</th><th>Dette+PH</th><th>MSA (Exo)</th><th>Net av. IR</th><th>IR 11 %</th><th>Net ap. IR / m</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${calc.rows.map((r) => `
+                  <tr>
+                    <td><strong>${r.yr}</strong></td>
+                    <td>${fmtEur(r.ca)}</td>
+                    <td>${fmtEur(r.ebe)}</td>
+                    <td>${fmtEur(r.dettePh)}</td>
+                    <td>${fmtEur(r.msa)} <span class="muted">(-${r.exoPct}%)</span></td>
+                    <td><strong>${fmtEur(r.netAvIrM)}/m</strong> <span class="muted">(${fmtEur(r.netAvIrAn)})</span></td>
+                    <td>${fmtEur(r.ir11)}</td>
+                    <td>${pill(`${fmtEur(r.netApIrM)}/m`, r.netApIrM >= 2950 ? "ok" : r.netApIrM >= 2400 ? "warn" : "bad")}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:8px;">
+            Avec ARE 60 % (<strong>${fmtEur(calc.are60Eur)}</strong> = 9 mois), le cumul 2028–2029 atteint <strong>${fmtEur(calc.tot2829AvIrEur)}</strong> avant IR (${calc.tot2829AvIrMonthly.toLocaleString("fr-FR")} €/m, écart ${calc.gap2829AvIrEur.toLocaleString("fr-FR")} €) et <strong>${fmtEur(calc.tot2829ApIrEur)}</strong> après IR 11 % CGI 73 B (${calc.tot2829ApIrMonthly.toLocaleString("fr-FR")} €/m, écart ${calc.gap2829ApIrEur.toLocaleString("fr-FR")} € vs objectif 72 000 €).
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h4 class="card-title">📈 Évolution Revenu Mensuel Net vs Seuil 3 000 €/mois</h4>
+          </div>
+          ${renderLineChartSvg(
+            [
+              { label: "Net avant IR (€/mois)", color: "#22c55e", values: calc.rows.map((r) => r.netAvIrM) },
+              { label: "Net après IR 11% (€/mois)", color: "#38bdf8", values: calc.rows.map((r) => r.netApIrM) },
+              { label: "Cap vital 3 000 €/mois", color: "#eab308", values: calc.rows.map(() => 3000) },
+            ],
+            calc.rows.map((r) => String(r.yr))
+          )}
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:14px;">
+        <div class="card">
+          <div class="card-header">
+            <h4 class="card-title">🏦 Plan de Financement Démarrage (Zéro Double Comptage)</h4>
+            ${pill(`Trésorerie 01/01/2028 : +${fmtEur(fin.netCashJan2028Eur || 9700)}`, "ok")}
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Poste (2027–2028)</th><th>Besoins</th><th>Ressources</th></tr></thead>
+              <tbody>
+                ${(fin.rows || []).map((row) => `
+                  <tr>
+                    <td>${esc(row.label)}</td>
+                    <td>${row.besoin ? fmtEur(row.besoin) : "—"}</td>
+                    <td>${row.ressource ? fmtEur(row.ressource) : "—"}</td>
+                  </tr>
+                `).join("")}
+                <tr>
+                  <td><strong>Total démarrage</strong></td>
+                  <td><strong>${fmtEur(fin.totalNeedsEur || 213500)}</strong></td>
+                  <td><strong>${fmtEur(fin.totalResourcesEur || 223200)}</strong></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:8px;">
+            <strong>Phase 2 (2029–2030 hors base) :</strong> ${(fin.phase2Bonus || []).map((b) => esc(b)).join(" · ")}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h4 class="card-title">🎯 Ateliers Cibles Croisière 2031–2033 (135 900 € CA)</h4>
+            ${pill("Marge EBE 49,4 %", "ok")}
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Atelier</th><th>CA Cible</th><th>Repère</th></tr></thead>
+              <tbody>
+                ${workshops.map((w) => `
+                  <tr>
+                    <td><strong>${esc(w.name)}</strong></td>
+                    <td><strong>${fmtEur(w.caEur)}</strong></td>
+                    <td class="muted">${esc(w.note)}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <h4 class="card-title">🛡️ 4 Barrières Non Négociables (Go / No-Go)</h4>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;">
+            ${barriers.map((b) => `
+              <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                <input type="checkbox" class="chk-project-barrier" data-barrier-id="${esc(b.id)}" ${b.checked ? "checked" : ""} />
+                <span>${esc(b.label)}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h4 class="card-title">🗂️ Checklist des 4 Rendez-vous Clés</h4>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px;">
+            ${meetings.map((m) => `
+              <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
+                <input type="checkbox" class="chk-project-meeting" data-meeting-id="${esc(m.id)}" ${m.done ? "checked" : ""} />
+                <span><strong>${esc(m.actor)} :</strong> ${esc(m.points)}</span>
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 export function renderViewForecastFinance(container, ctx) {
   const { state, uiState } = ctx;
@@ -16,6 +205,7 @@ export function renderViewForecastFinance(container, ctx) {
     .map(([key, day]) => `${key.toUpperCase()} à J+${day}`);
 
   container.innerHTML = `
+    ${state.projectPlan ? renderProjectPlanSection(state.projectPlan) : ""}
     <div class="card" style="margin-bottom:14px;">
       <div class="card-header">
         <h3 class="card-title">🔮 Simulateur « Prévoir l'avenir » & Labo Scénarios What-If</h3>
@@ -173,6 +363,37 @@ export function renderViewForecastFinance(container, ctx) {
 
   container.querySelector("#btn-export-json").addEventListener("click", () => {
     downloadFile("sg-vision-farmer-backup.json", JSON.stringify(state, null, 2), "application/json;charset=utf-8");
+  });
+
+  const selLoan = container.querySelector("#sel-loan-mode");
+  if (selLoan && state.projectPlan) {
+    selLoan.addEventListener("change", (e) => {
+      state.projectPlan.loan = state.projectPlan.loan || {};
+      state.projectPlan.loan.deferred24m = e.target.value === "deferred";
+      ctx.toast(`Option prêt mise à jour : ${state.projectPlan.loan.deferred24m ? "Différé 24 mois (2 + 18 ans)" : "Sans différé (20 ans)"}`);
+      ctx.save();
+      ctx.rerender();
+    });
+  }
+
+  container.querySelectorAll(".chk-project-barrier").forEach((chk) => {
+    chk.addEventListener("change", () => {
+      const item = (state.projectPlan?.barriers || []).find((b) => b.id === chk.dataset.barrierId);
+      if (item) {
+        item.checked = chk.checked;
+        ctx.save();
+      }
+    });
+  });
+
+  container.querySelectorAll(".chk-project-meeting").forEach((chk) => {
+    chk.addEventListener("change", () => {
+      const item = (state.projectPlan?.meetings || []).find((m) => m.id === chk.dataset.meetingId);
+      if (item) {
+        item.done = chk.checked;
+        ctx.save();
+      }
+    });
   });
 }
 

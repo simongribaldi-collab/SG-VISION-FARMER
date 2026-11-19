@@ -19,7 +19,12 @@ function getRobotBasePos(state) {
     (state.structures || []).find((s) => s.type === "hangar") ||
     (state.structures || []).find((s) => s.type === "solar_array");
   if (!baseStruct) return { x: 11, z: -6 };
-  return { x: Number(baseStruct.x) || 11, z: Number((baseStruct.z || -8) + 2.2) };
+  const rot = baseStruct.rot || 0;
+  if (Math.abs(rot) > 0.4) {
+    const halfSpanX = (Math.abs(Math.cos(rot)) * (baseStruct.w || 8) + Math.abs(Math.sin(rot)) * (baseStruct.d || 5)) * 0.5;
+    return { x: Number(baseStruct.x) - halfSpanX - 1.5, z: Number(baseStruct.z || 0) - 2.3 };
+  }
+  return { x: Number(baseStruct.x) || 11, z: Number((baseStruct.z || -8) + (baseStruct.d || 5) * 0.5 + 1.0) };
 }
 
 export function dispatchRobot(state, robotId, plotId, taskLabel = "") {
@@ -213,11 +218,15 @@ export function tickRobots(state, dtSeconds, elapsedSec) {
         continue;
       }
       if (plot) {
-        // Trajectoire aller-retour le long des rangs de la planche cible
+        // Trajectoire aller-retour orientee selon les rangs de la planche cible (rot supporte)
         const span = Math.max(1.5, (plot.w || 6) * 0.42);
         const speed = eq.kind === "drone" ? 1.4 : 0.7;
-        eq.targetX = plot.x + Math.sin(elapsedSec * speed + eq.id.length) * span;
-        eq.targetZ = plot.z + Math.cos(elapsedSec * speed * 0.5) * Math.max(0.4, (plot.d || 2) * 0.28);
+        const lx = Math.sin(elapsedSec * speed + eq.id.length) * span;
+        const lz = Math.cos(elapsedSec * speed * 0.5) * Math.max(0.4, (plot.d || 2) * 0.28);
+        const pr = plot.rot || 0;
+        const cosP = Math.cos(pr), sinP = Math.sin(pr);
+        eq.targetX = plot.x + cosP * lx + sinP * lz;
+        eq.targetZ = plot.z - sinP * lx + cosP * lz;
       }
       const dx = (eq.targetX ?? eq.x) - eq.x;
       const dz = (eq.targetZ ?? eq.z) - eq.z;
