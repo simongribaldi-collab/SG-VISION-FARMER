@@ -86,6 +86,7 @@ export function renderView3D(container, ctx) {
               <button class="btn btn-sm" data-cam="ar">🥽 Vue AR</button>
               <button class="btn btn-sm ${uiState.shadowsEnabled !== false ? "active" : ""}" id="btn-toggle-shadows">☀️ Ombres HD</button>
               <button class="btn btn-sm ${uiState.showArPins ? "active" : ""}" id="btn-toggle-pins">🏷️ Étiquettes</button>
+              <button class="btn btn-sm" id="btn-photo-hd" title="Exporter un rendu HD 2560×1440 (Shift+clic = 4K 3840×2160)">📸 Photo HD</button>
               <button class="btn btn-sm ${uiState.scannerOpen ? "btn-amber" : "btn-primary"}" id="btn-open-scanner">🎥 Filmer / Scanner la Ferme</button>
             </div>
           </div>
@@ -155,6 +156,8 @@ export function renderView3D(container, ctx) {
                 ${uiState.buildActive ? "✋ Quitter Mode Construction" : "➕ Placer sur le terrain 3D"}
               </button>
               <button class="btn btn-sm" id="btn-build-rot">↻ Pivoter (${Math.round((uiState.buildRot * 180) / Math.PI)}°)</button>
+              <button class="btn btn-sm" id="btn-import-glb" title="Importer un objet/bâtiment/tracteur 3D au format .glb ou .gltf">📦 Importer .GLB</button>
+              <input type="file" id="inp-import-glb" accept=".glb,.gltf" style="display:none;" />
             </div>
           </div>
 
@@ -269,6 +272,49 @@ export function renderView3D(container, ctx) {
 
   container.querySelector("#btn-toggle-pins").addEventListener("click", () => {
     uiState.showArPins = !uiState.showArPins;
+    ctx.rerender();
+  });
+
+  container.querySelector("#btn-photo-hd")?.addEventListener("click", (e) => {
+    if (!ctx.engine3d?.exportPhotoRender) return;
+    const is4k = Boolean(e.shiftKey);
+    const w = is4k ? 3840 : 2560;
+    const h = is4k ? 2160 : 1440;
+    const url = ctx.engine3d.exportPhotoRender({ width: w, height: h });
+    if (url) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sg-vision-farmer-${is4k ? "4k" : "hd"}-${Date.now()}.png`;
+      a.click();
+      ctx.toast(`📸 Rendu PBR ${w}×${h} exporté en PNG !`);
+    }
+  });
+
+  const inpGlb = container.querySelector("#inp-import-glb");
+  container.querySelector("#btn-import-glb")?.addEventListener("click", () => inpGlb?.click());
+  inpGlb?.addEventListener("change", async () => {
+    const file = inpGlb.files?.[0];
+    if (!file) return;
+    let url = URL.createObjectURL(file);
+    try {
+      const buf = await file.arrayBuffer();
+      const resp = await fetch(`/api/models?name=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: buf,
+      });
+      if (resp.ok) {
+        const saved = await resp.json();
+        if (saved?.url) url = saved.url;
+      }
+    } catch {}
+    uiState.buildActive = true;
+    uiState.sculptActive = false;
+    uiState.buildType = "custom_glb";
+    uiState.customGlbUrl = url;
+    uiState.customGlbName = file.name.replace(/\.(glb|gltf)$/i, "");
+    ctx.engine3d?.loadGlbModel?.(url);
+    ctx.toast(`📦 Modèle « ${file.name} » prêt : cliquez sur le terrain 3D pour le placer !`);
     ctx.rerender();
   });
 
@@ -686,6 +732,12 @@ function renderInspector(sel, state, forecast) {
         ${pill(`${s.type} · Alt ${elevM}m`, "info")}
       </div>
       <div class="muted" style="margin-bottom:8px;">Position 3D : X=${s.x}m, Z=${s.z}m · Emprise ${s.w}×${s.d} m</div>
+      ${s.type === "custom_glb" ? `
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px;">
+          Échelle modèle : <strong id="lbl-glb-scale">${(s.scale || 1).toFixed(2)}×</strong>
+          <input type="range" id="insp-glb-scale" data-glb-id="${s.id}" min="0.2" max="4.0" step="0.05" value="${s.scale || 1}" style="flex:1;accent-color:#22c55e;" />
+        </label>
+      ` : ""}
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         ${isCoop ? `<button class="btn btn-primary btn-sm" data-insp-coop="${s.id}">🚪 ${s.doorOpen ? "Fermer trappe" : "Ouvrir trappe"}</button>` : ""}
         <button class="btn btn-sm" data-insp-rot-struct="${s.id}">↻ Pivoter 90°</button>
@@ -816,6 +868,19 @@ function bindInspectorEvents(insp, ctx) {
       ctx.rerender();
     });
   });
+
+  const glbScaleInp = insp.querySelector("#insp-glb-scale");
+  if (glbScaleInp) {
+    glbScaleInp.addEventListener("input", () => {
+      const s = state.structures.find((x) => x.id === glbScaleInp.dataset.glbId);
+      if (s) {
+        s.scale = Number(glbScaleInp.value);
+        const lbl = insp.querySelector("#lbl-glb-scale");
+        if (lbl) lbl.textContent = `${s.scale.toFixed(2)}×`;
+      }
+    });
+    glbScaleInp.addEventListener("change", () => ctx.save());
+  }
 
   insp.querySelectorAll("[data-insp-del-struct]").forEach((btn) => {
     btn.addEventListener("click", () => {

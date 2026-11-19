@@ -1088,7 +1088,7 @@ function buildGrangesBeaumontState(scaleMeta, loc, terrain, forecast7) {
     { id: "STR-COUR", type: "path_dirt", label: "Cour Accès Chemin des Serres", x: 11.2, z: 13.0, w: 6.6, d: 2.2, h: 0.08, rot: 0.14 },
     { id: "STR-LOCKERS", type: "locker_kiosk", label: "Casiers Fermiers 24h/24 (Angle D532 / Ch. des Serres)", x: 10.6, z: 14.8, w: 4.2, d: 2.2, h: 2.6, rot: -0.15 },
     { id: "STR-D532", type: "road_paved", label: "D 532 — Rue du Tram", x: -2.0, z: 18.6, w: 42, d: 3.0, h: 0.1, rot: -0.15 },
-    { id: "STR-CH-SERRES", type: "road_paved", label: "Chemin des Serres", x: 18.2, z: 2.8, w: 38, d: 2.2, h: 0.1, rot: 1.24 },
+    { id: "STR-CH-SERRES", type: "road_paved", label: "Chemin des Serres", x: 18.8, z: 0.8, w: 33.5, d: 2.2, h: 0.1, rot: 1.24 },
     { id: "STR-TANK", type: "water_tank", label: "Cuve Tampon Irrigation Serres", x: 4.2, z: -2.0, w: 1.8, d: 1.8, h: 3.0, rot: 0 },
     { id: "STR-WELL", type: "well_pump", label: "Forage & Droits d'Eau Plaine", x: 4.2, z: 0.8, w: 1.6, d: 1.6, h: 2.2, rot: 0 },
     { id: "STR-SOL", type: "solar_array", label: "Ombrière PV 12 kWc (Autoconso Frigo/Casiers)", x: 4.2, z: 5.2, w: 4.2, d: 2.2, h: 2.0, rot: Math.PI / 2, kwPeak: 12 },

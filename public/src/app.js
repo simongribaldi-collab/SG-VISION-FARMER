@@ -456,6 +456,27 @@ class AppController {
   }
 
   placeBuilding3D({ type, x, z, rot }) {
+    if (type === "custom_glb" && this.uiState.customGlbUrl) {
+      const label = this.uiState.customGlbName || "Modèle 3D .GLB";
+      this.state.structures.push({
+        id: `STR-${Date.now()}`,
+        type: "custom_glb",
+        label,
+        modelUrl: this.uiState.customGlbUrl,
+        x,
+        z,
+        w: 4,
+        d: 4,
+        h: 3,
+        rot,
+        scale: 1,
+      });
+      this.toast(`📦 ${label} placé sur le terrain 3D !`);
+      this.saveState();
+      this.rerender();
+      return;
+    }
+
     const cat = BUILDING_CATALOG.find((b) => b.type === type);
     if (!cat) return;
 

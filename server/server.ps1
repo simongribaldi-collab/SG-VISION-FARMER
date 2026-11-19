@@ -18,6 +18,10 @@ if (-not (Test-Path $DataDir)) {
 $StateFile = Join-Path $DataDir "farm-state.json"
 $HudFile = Join-Path $DataDir "hud-state.json"
 $TelemetryFile = Join-Path $DataDir "telemetry-log.json"
+$ModelsDir = Join-Path $DataDir "models"
+if (-not (Test-Path $ModelsDir)) {
+    New-Item -ItemType Directory -Path $ModelsDir -Force | Out-Null
+}
 $PidFile = Join-Path $DataDir "server.pid"
 $PID | Out-File -FilePath $PidFile -Encoding ascii -Force
 
@@ -31,6 +35,11 @@ $MimeTypes = @{
     ".svg"         = "image/svg+xml"
     ".png"         = "image/png"
     ".jpg"         = "image/jpeg"
+    ".webp"        = "image/webp"
+    ".glb"         = "model/gltf-binary"
+    ".gltf"        = "model/gltf+json"
+    ".bin"         = "application/octet-stream"
+    ".hdr"         = "application/octet-stream"
     ".ico"         = "image/x-icon"
     ".txt"         = "text/plain; charset=utf-8"
 }
@@ -115,8 +124,9 @@ function Read-HttpRequest([System.IO.Stream]$Stream) {
     }
 
     $bodyStart = $headerEnd + 4
+    $bodyBytes = New-Object byte[] 0
     $bodyText = ""
-    if ($contentLen -gt 0) {
+    if ($contentLen -gt 0 -and $contentLen -le 26214400) {
         $bodyMs = New-Object System.IO.MemoryStream
         $already = $allBytes.Length - $bodyStart
         if ($already -gt 0) {
@@ -129,11 +139,14 @@ function Read-HttpRequest([System.IO.Stream]$Stream) {
             if ($r -le 0) { break }
             $bodyMs.Write($buf, 0, $r)
         }
-        $bodyText = [System.Text.Encoding]::UTF8.GetString($bodyMs.ToArray())
+        $bodyBytes = $bodyMs.ToArray()
+        if (-not $path.StartsWith("/api/models")) {
+            $bodyText = [System.Text.Encoding]::UTF8.GetString($bodyBytes)
+        }
         $bodyMs.Dispose()
     }
     $ms.Dispose()
-    return @{ Method = $method; Path = $path; RawUrl = $rawUrl; Body = $bodyText }
+    return @{ Method = $method; Path = $path; RawUrl = $rawUrl; Body = $bodyText; BodyBytes = $bodyBytes }
 }
 
 function Get-LocalStateObject {
@@ -350,11 +363,63 @@ try {
                 Send-Json $stream @{
                     ok        = $true
                     app       = "SG Vision Farmer"
-                    version   = "3.0.0"
+                    version   = "4.0.0"
                     uptimeSec = [int]((Get-Date) - $StartTime).TotalSeconds
                     hasState  = (Test-Path $StateFile)
                     mcpTools  = $McpTools.Count
                     host      = $Prefix
+                }
+                continue
+            }
+
+            if ($path -eq "/api/models") {
+                if ($method -eq "GET") {
+                    $list = Get-ChildItem -Path $ModelsDir -File -ErrorAction SilentlyContinue | ForEach-Object {
+                        @{ name = $_.Name; url = "/api/models/$($_.Name)"; bytes = $_.Length }
+                    }
+                    Send-Json $stream @{ ok = $true; models = @($list) } 200
+                    continue
+                }
+                if ($method -eq "POST") {
+                    $rawName = "model.glb"
+                    if ($req.RawUrl -match '[?&]name=([^&]+)') {
+                        $rawName = [System.Uri]::UnescapeDataString($Matches[1])
+                    }
+                    $rawName = [System.IO.Path]::GetFileName($rawName)
+                    $safeName = $rawName -replace '[^a-zA-Z0-9._-]', '_'
+                    $ext = [System.IO.Path]::GetExtension($safeName).ToLowerInvariant()
+                    if ($ext -ne ".glb" -and $ext -ne ".gltf") {
+                        Send-Json $stream @{ error = "Extension invalide (.glb ou .gltf requis)" } 400
+                        continue
+                    }
+                    if (-not $req.BodyBytes -or $req.BodyBytes.Length -eq 0) {
+                        Send-Json $stream @{ error = "Fichier 3D vide" } 400
+                        continue
+                    }
+                    $destPath = [System.IO.Path]::GetFullPath((Join-Path $ModelsDir $safeName))
+                    $modelsRootFull = [System.IO.Path]::GetFullPath($ModelsDir)
+                    if (-not $destPath.StartsWith($modelsRootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        Send-Json $stream @{ error = "Forbidden" } 403
+                        continue
+                    }
+                    [System.IO.File]::WriteAllBytes($destPath, $req.BodyBytes)
+                    Send-Json $stream @{ ok = $true; name = $safeName; url = "/api/models/$safeName"; bytes = $req.BodyBytes.Length } 200
+                    continue
+                }
+            }
+
+            if ($path.StartsWith("/api/models/") -and $method -eq "GET") {
+                $reqName = $path.Substring("/api/models/".Length)
+                $safeName = [System.IO.Path]::GetFileName($reqName) -replace '[^a-zA-Z0-9._-]', '_'
+                $modelPath = [System.IO.Path]::GetFullPath((Join-Path $ModelsDir $safeName))
+                $modelsRootFull = [System.IO.Path]::GetFullPath($ModelsDir)
+                if ($modelPath.StartsWith($modelsRootFull, [System.StringComparison]::OrdinalIgnoreCase) -and (Test-Path $modelPath)) {
+                    $ext = [System.IO.Path]::GetExtension($modelPath).ToLowerInvariant()
+                    $mime = if ($MimeTypes.ContainsKey($ext)) { $MimeTypes[$ext] } else { "application/octet-stream" }
+                    $bytes = [System.IO.File]::ReadAllBytes($modelPath)
+                    Send-HttpResponse $stream $bytes $mime 200
+                } else {
+                    Send-Json $stream @{ error = "Model not found" } 404
                 }
                 continue
             }

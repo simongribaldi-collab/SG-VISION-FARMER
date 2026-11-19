@@ -74,6 +74,13 @@ try {
     if (-not $tel.ok) { throw "Telemetry webhook failed" }
     Write-Host "[PASS] POST /api/telemetry -> stored=$($tel.stored)"
 
+    $glbBytes = [byte[]](0x67, 0x6C, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00)
+    $upRes = Invoke-RestMethod -Uri "$baseUrl/api/models?name=test_tracteur.glb" -Method Post -ContentType "application/octet-stream" -Body $glbBytes
+    if (-not $upRes.ok -or $upRes.url -ne "/api/models/test_tracteur.glb") { throw "POST /api/models failed" }
+    $dlResp = Invoke-WebRequest -Uri "$baseUrl/api/models/test_tracteur.glb" -UseBasicParsing
+    if ($dlResp.StatusCode -ne 200 -or $dlResp.RawContentLength -ne $glbBytes.Length) { throw "GET /api/models binary mismatch" }
+    Write-Host "[PASS] POST/GET /api/models binary GLB roundtrip -> $($upRes.url) ($($upRes.bytes) bytes)"
+
     Remove-Item (Join-Path $testDataDir "farm-state.json") -ErrorAction SilentlyContinue
     $edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
     if (Test-Path $edgePath) {
@@ -214,14 +221,14 @@ try {
     throw new Error("Expected AI command mutations and cashBalance update");
   }
 
-  // Test WebGL V3 engine: 3 shader programs, Shadow FBO, all presets, lighting times, rain & 6 overlays
+  // Test WebGL V4 Three.js PBR engine: shaders, Sky/PMREM, ShadowMap 2048, all presets, rain, overlays & Photo HD export
   const mount = document.getElementById("mount");
   const testCanvas = document.createElement("canvas");
   testCanvas.width = 640; testCanvas.height = 400;
   document.body.appendChild(testCanvas);
   const eng = new Farm3DEngine(testCanvas, {});
-  if (!eng.gl) throw new Error("WebGL context not available in headless Edge");
-  if (!eng.shadowSupported) throw new Error("Shadow FBO not supported in headless Edge");
+  if (!eng.renderer || !eng.gl) throw new Error("Three.js WebGLRenderer not available in headless Edge");
+  if (!eng.shadowSupported) throw new Error("ShadowMap not supported in headless Edge");
   for (const preset of SCALE_PRESETS) {
     const ps = buildPresetState(preset.id);
     const pfc = simulateFuture(ps, 14, "normal", 0);
@@ -233,7 +240,11 @@ try {
   }
   for (const ov of ["normal", "moisture", "health", "disease", "energy", "ar"]) {
     eng.overlay = ov;
-    eng.render(st, fc0, 0.016);
+    eng.render(gbState, simulateFuture(gbState, 14, "normal", 0), 0.016);
+  }
+  const photoUrl = eng.exportPhotoRender({ width: 800, height: 450 });
+  if (!photoUrl || !photoUrl.startsWith("data:image/png;base64,") || photoUrl.length < 4000) {
+    throw new Error("exportPhotoRender did not produce a valid PNG");
   }
   const glErr = eng.gl.getError();
   if (glErr !== 0) throw new Error("WebGL error detected: " + glErr);
@@ -254,6 +265,9 @@ try {
     }
   };
   renderView3D(mount, ctx);
+  if (!mount.querySelector("#btn-photo-hd") || !mount.querySelector("#btn-import-glb")) {
+    throw new Error("Missing Photo HD or GLB import controls in View 3D");
+  }
   for (const tab of ["plots", "rotations", "planning", "diseases"]) {
     ctx.uiState.agroTab = tab;
     renderViewAgronomy(mount, ctx);
@@ -293,20 +307,20 @@ try {
     throw new Error("Finance view missing Granges-les-Beaumont project block");
   }
   renderViewEcosystem(mount, ctx);
-  out.textContent = "ALL_7_VIEWS_AND_V3_ENGINES_PASS";
+  out.textContent = "ALL_7_VIEWS_AND_V4_PBR_PASS";
 } catch (err) {
   out.textContent = "FAIL: " + (err && err.stack ? err.stack : err);
 }
 </script></body></html>
 '@ | Set-Content -Path $verifyHtmlPath -Encoding UTF8
 
-        $vProc = Start-Process -FilePath $edgePath -ArgumentList ($edgeWebGlArgs + @("--virtual-time-budget=5000", "--dump-dom", "`"$baseUrl/_verify_tmp.html`"")) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $verifyDomOut -RedirectStandardError (Join-Path $Root "tools\edge-verr.tmp.log")
+        $vProc = Start-Process -FilePath $edgePath -ArgumentList ($edgeWebGlArgs + @("--virtual-time-budget=8000", "--dump-dom", "`"$baseUrl/_verify_tmp.html`"")) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $verifyDomOut -RedirectStandardError (Join-Path $Root "tools\edge-verr.tmp.log")
         $vDom = if (Test-Path $verifyDomOut) { Get-Content $verifyDomOut -Raw -Encoding UTF8 } else { "" }
         Remove-Item $verifyHtmlPath, $verifyDomOut, (Join-Path $Root "tools\edge-verr.tmp.log") -ErrorAction SilentlyContinue
-        if ($vDom -match "ALL_7_VIEWS_AND_V3_ENGINES_PASS") {
-            Write-Host "[PASS] Deep JS/WebGL V3 Verification: shaders, shadow FBO, all 5 scale presets, Time-Machine, rotations, livestock, finances, AI & all 7 views passed!"
+        if ($vDom -match '<div id="res">ALL_7_VIEWS_AND_V4_PBR_PASS</div>') {
+            Write-Host "[PASS] Deep JS/WebGL V4 PBR Verification: Three.js Sky/PMREM, ShadowMap 2048, all 6 scale presets, Photo HD, Time-Machine, rotations, livestock, finances, AI & all 7 views passed!"
         } else {
-            throw "Deep JS/WebGL V3 Verification failed: $vDom"
+            throw "Deep JS/WebGL V4 PBR Verification failed: $vDom"
         }
 
         Remove-Item $domOut, $gDomOut, (Join-Path $Root "tools\edge-err.tmp.log"), (Join-Path $Root "tools\edge-gerr.tmp.log") -ErrorAction SilentlyContinue

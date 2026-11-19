@@ -1,151 +1,22 @@
+import * as THREE from "../../vendor/three/three.module.min.js";
+import { GLTFLoader } from "../../vendor/three/loaders/GLTFLoader.js";
+import { Sky } from "../../vendor/three/objects/Sky.js";
 import { BUILDING_CATALOG, generateTerrainHeights } from "../data/presets.js";
-import { getCropById } from "./predictor.js";
-import { computeSunPosition } from "./weather.js";
+import { createPbrMaterials } from "./texturesPbr.js";
 import {
-  buildTerrainAndHorizonMesh,
-  createArchRibGeometry,
-  createArchTunnelGeometry,
-  createBoxGeometry,
-  createConeGeometry,
-  createCylinderGeometry,
-  createLeafClusterGeometry,
-  createRoofGeometry,
-  createSkyDomeGeometry,
-  createSphereGeometry,
-  createTurbineBladeGeometry,
-  sampleExtendedTerrainHeight,
-} from "./geometries3d.js";
-import { createShaderProgram, MAIN_FS, MAIN_VS, SHADOW_FS, SHADOW_VS, SKY_FS, SKY_VS } from "./shaders3d.js";
-
-// --- Math 3D (mat4 column-major) ---
-function mat4Mul(a, b) {
-  const out = new Float32Array(16);
-  for (let c = 0; c < 4; c++) {
-    for (let r = 0; r < 4; r++) {
-      out[c * 4 + r] =
-        a[0 * 4 + r] * b[c * 4 + 0] +
-        a[1 * 4 + r] * b[c * 4 + 1] +
-        a[2 * 4 + r] * b[c * 4 + 2] +
-        a[3 * 4 + r] * b[c * 4 + 3];
-    }
-  }
-  return out;
-}
-
-function mat4Perspective(fovRad, aspect, near, far) {
-  const f = 1.0 / Math.tan(fovRad / 2);
-  const nf = 1 / (near - far);
-  return new Float32Array([
-    f / aspect, 0, 0, 0,
-    0, f, 0, 0,
-    0, 0, (far + near) * nf, -1,
-    0, 0, 2 * far * near * nf, 0,
-  ]);
-}
-
-function mat4Ortho(left, right, bottom, top, near, far) {
-  const lr = 1 / (left - right);
-  const bt = 1 / (bottom - top);
-  const nf = 1 / (near - far);
-  return new Float32Array([
-    -2 * lr, 0, 0, 0,
-    0, -2 * bt, 0, 0,
-    0, 0, 2 * nf, 0,
-    (left + right) * lr, (top + bottom) * bt, (far + near) * nf, 1,
-  ]);
-}
-
-function mat4LookAt(eye, target, up) {
-  let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
-  let len = Math.hypot(zx, zy, zz) || 1;
-  zx /= len; zy /= len; zz /= len;
-
-  let xx = up[1] * zz - up[2] * zy;
-  let xy = up[2] * zx - up[0] * zz;
-  let xz = up[0] * zy - up[1] * zx;
-  len = Math.hypot(xx, xy, xz) || 1;
-  xx /= len; xy /= len; xz /= len;
-
-  const yx = zy * xz - zz * xy;
-  const yy = zz * xx - zx * xz;
-  const yz = zx * xy - zy * xx;
-
-  return new Float32Array([
-    xx, yx, zx, 0,
-    xy, yy, zy, 0,
-    xz, yz, zz, 0,
-    -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
-    -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
-    -(zx * eye[0] + zy * eye[1] + zz * eye[2]),
-    1,
-  ]);
-}
-
-function mat4Transform(tx, ty, tz, rx, ry, rz, sx, sy, sz) {
-  const cx = Math.cos(rx), sxr = Math.sin(rx);
-  const cy = Math.cos(ry), syr = Math.sin(ry);
-  const cz = Math.cos(rz), szr = Math.sin(rz);
-
-  const m00 = (cy * cz + syr * sxr * szr) * sx;
-  const m10 = (cx * szr) * sx;
-  const m20 = (-syr * cz + cy * sxr * szr) * sx;
-
-  const m01 = (-cy * szr + syr * sxr * cz) * sy;
-  const m11 = (cx * cz) * sy;
-  const m21 = (syr * szr + cy * sxr * cz) * sy;
-
-  const m02 = (syr * cx) * sz;
-  const m12 = (-sxr) * sz;
-  const m22 = (cy * cx) * sz;
-
-  return new Float32Array([
-    m00, m10, m20, 0,
-    m01, m11, m21, 0,
-    m02, m12, m22, 0,
-    tx, ty, tz, 1,
-  ]);
-}
-
-function mat3NormalFromMat4(m, out) {
-  const a00 = m[0], a10 = m[1], a20 = m[2];
-  const a01 = m[4], a11 = m[5], a21 = m[6];
-  const a02 = m[8], a12 = m[9], a22 = m[10];
-
-  const c00 = a11 * a22 - a12 * a21;
-  const c10 = -(a01 * a22 - a02 * a21);
-  const c20 = a01 * a12 - a02 * a11;
-
-  const c01 = -(a10 * a22 - a12 * a20);
-  const c11 = a00 * a22 - a02 * a20;
-  const c21 = -(a00 * a12 - a02 * a10);
-
-  const c02 = a10 * a21 - a11 * a20;
-  const c12 = -(a00 * a21 - a01 * a20);
-  const c22 = a00 * a11 - a01 * a10;
-
-  let det = a00 * c00 + a01 * c01 + a02 * c02;
-  if (Math.abs(det) < 1e-10) {
-    out[0] = 1; out[1] = 0; out[2] = 0;
-    out[3] = 0; out[4] = 1; out[5] = 0;
-    out[6] = 0; out[7] = 0; out[8] = 1;
-    return out;
-  }
-  const invDet = 1 / det;
-  out[0] = c00 * invDet; out[1] = c10 * invDet; out[2] = c20 * invDet;
-  out[3] = c01 * invDet; out[4] = c11 * invDet; out[5] = c21 * invDet;
-  out[6] = c02 * invDet; out[7] = c12 * invDet; out[8] = c22 * invDet;
-  return out;
-}
-
-function lerpColor(c1, c2, t) {
-  const k = Math.max(0, Math.min(1, t));
-  return [c1[0] + (c2[0] - c1[0]) * k, c1[1] + (c2[1] - c1[1]) * k, c1[2] + (c2[2] - c1[2]) * k];
-}
-
-function smoothstep(e0, e1, x) {
-  const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-}
+  buildAnimalMeshPbr,
+  buildCadastralParcelsPbr,
+  buildInstancedGrassPbr,
+  buildPerimeterTreesPbr,
+  buildPlotsAndCropsPbr,
+  buildRiverPbr,
+  buildRobotMeshPbr,
+  buildStructuresPbr,
+  buildTerrainMeshPbr,
+  createSharedGeometries,
+  disposeSharedGeometries,
+} from "./sceneBuildersPbr.js";
+import { computeSunPosition } from "./weather.js";
 
 /**
  * Interpole la hauteur du terrain (denivele) en tout point (x, z) du monde 3D.
@@ -221,21 +92,6 @@ export function sculptTerrainAt(state, worldX, worldZ, tool = "raise", radius = 
   t._version = (t._version || 0) + 1;
 }
 
-const MAT = {
-  DEFAULT: 0,
-  TERRAIN: 1,
-  WATER: 2,
-  STONE: 3,
-  TILE: 4,
-  FOLIAGE: 5,
-  GLASS: 6,
-  SOIL: 7,
-  WOOD: 8,
-  GRAVEL: 9,
-  METAL: 10,
-  FUR: 11,
-};
-
 export class Farm3DEngine {
   constructor(canvas, callbacks = {}) {
     this.canvas = canvas;
@@ -247,290 +103,228 @@ export class Farm3DEngine {
     this.sculptMode = { active: false, tool: "raise", radius: 5.0 };
     this.shadowsEnabled = true;
     this.shadowSupported = false;
-    this.shadowSize = 1536;
+    this.shadowSize = 2048;
+
+    this.elapsed = 0;
     this.hitBoxes = [];
     this.arPins = [];
-    this.elapsed = 0;
+    this.lastState = null;
+
     this.dragging = false;
     this.dragButton = 0;
-    this.lastMouse = { x: 0, y: 0 };
     this.dragMoved = false;
+    this.lastMouse = { x: 0, y: 0 };
     this._didSculpt = false;
-    this.terrainCacheKey = "";
-    this.lastState = null;
-    this._normMatBuf = new Float32Array(9);
 
-    this.gl = canvas.getContext("webgl", { antialias: true, alpha: false, depth: true });
-    if (this.gl) {
-      this._initWebGL();
-    } else {
-      this.ctx2d = canvas.getContext("2d");
-    }
+    this.glbCache = new Map();
+    this.glbLoading = new Set();
+    this._terrainSig = "";
+    this._grassSig = "";
+    this._cadastralSig = "";
+    this._staticSig = "";
+    this._livestockSig = "";
+    this._robotSig = "";
+    this._envBucket = "";
+    this.envTarget = null;
+    this.animItems = [];
+    this.animalAgents = [];
+    this.robotAgents = [];
+    this.staticHitBoxes = [];
+    this.staticArPinDescs = [];
+    this.cadastralPinDescs = [];
+
+    this._initThree();
     this._bindEvents();
   }
 
-  _initWebGL() {
-    const gl = this.gl;
-
-    this.skyProg = createShaderProgram(gl, SKY_VS, SKY_FS, "sky");
-    this.shadowProg = createShaderProgram(gl, SHADOW_VS, SHADOW_FS, "shadow");
-    this.mainProg = createShaderProgram(gl, MAIN_VS, MAIN_FS, "main");
-
-    this.skyLocs = {
-      aPos: gl.getAttribLocation(this.skyProg, "aPos"),
-      uProj: gl.getUniformLocation(this.skyProg, "uProj"),
-      uView: gl.getUniformLocation(this.skyProg, "uView"),
-      uSunDir: gl.getUniformLocation(this.skyProg, "uSunDir"),
-      uSunInt: gl.getUniformLocation(this.skyProg, "uSunInt"),
-      uRain: gl.getUniformLocation(this.skyProg, "uRain"),
-      uTime: gl.getUniformLocation(this.skyProg, "uTime"),
-    };
-
-    this.shadowLocs = {
-      aPos: gl.getAttribLocation(this.shadowProg, "aPos"),
-      uLightVP: gl.getUniformLocation(this.shadowProg, "uLightVP"),
-      uModel: gl.getUniformLocation(this.shadowProg, "uModel"),
-      uTime: gl.getUniformLocation(this.shadowProg, "uTime"),
-      uWindAmt: gl.getUniformLocation(this.shadowProg, "uWindAmt"),
-    };
-
-    this.mainLocs = {
-      aPos: gl.getAttribLocation(this.mainProg, "aPos"),
-      aNorm: gl.getAttribLocation(this.mainProg, "aNorm"),
-      uProj: gl.getUniformLocation(this.mainProg, "uProj"),
-      uView: gl.getUniformLocation(this.mainProg, "uView"),
-      uModel: gl.getUniformLocation(this.mainProg, "uModel"),
-      uNormalMat: gl.getUniformLocation(this.mainProg, "uNormalMat"),
-      uLightVP: gl.getUniformLocation(this.mainProg, "uLightVP"),
-      uEyePos: gl.getUniformLocation(this.mainProg, "uEyePos"),
-      uColor: gl.getUniformLocation(this.mainProg, "uColor"),
-      uSunDir: gl.getUniformLocation(this.mainProg, "uSunDir"),
-      uSunColor: gl.getUniformLocation(this.mainProg, "uSunColor"),
-      uSunInt: gl.getUniformLocation(this.mainProg, "uSunInt"),
-      uSkyColor: gl.getUniformLocation(this.mainProg, "uSkyColor"),
-      uHorizonColor: gl.getUniformLocation(this.mainProg, "uHorizonColor"),
-      uEmissive: gl.getUniformLocation(this.mainProg, "uEmissive"),
-      uMatType: gl.getUniformLocation(this.mainProg, "uMatType"),
-      uTime: gl.getUniformLocation(this.mainProg, "uTime"),
-      uRain: gl.getUniformLocation(this.mainProg, "uRain"),
-      uWindAmt: gl.getUniformLocation(this.mainProg, "uWindAmt"),
-      uShadowsEnabled: gl.getUniformLocation(this.mainProg, "uShadowsEnabled"),
-      uShadowTexel: gl.getUniformLocation(this.mainProg, "uShadowTexel"),
-      uShadowMap: gl.getUniformLocation(this.mainProg, "uShadowMap"),
-      uShowContours: gl.getUniformLocation(this.mainProg, "uShowContours"),
-    };
-
-    const upload = (geom) => {
-      const posBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, geom.pos, gl.STATIC_DRAW);
-      const normBuf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, normBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, geom.norm, gl.STATIC_DRAW);
-      return { posBuf, normBuf, count: geom.count };
-    };
-
-    this.meshes = {
-      box: upload(createBoxGeometry()),
-      cyl: upload(createCylinderGeometry(20)),
-      cone: upload(createConeGeometry(18)),
-      sphere: upload(createSphereGeometry(12, 18)),
-      roof: upload(createRoofGeometry()),
-      arch: upload(createArchTunnelGeometry(16)),
-      archRib: upload(createArchRibGeometry(16, 0.045)),
-      leafCluster: upload(createLeafClusterGeometry()),
-      blade: upload(createTurbineBladeGeometry()),
-      skyDome: upload(createSkyDomeGeometry(16, 28)),
-      terrain: { posBuf: gl.createBuffer(), normBuf: gl.createBuffer(), count: 0 },
-      river: { posBuf: gl.createBuffer(), normBuf: gl.createBuffer(), count: 0 },
-      riverBed: { posBuf: gl.createBuffer(), normBuf: gl.createBuffer(), count: 0 },
-    };
-
-    // Framebuffer d'ombres 1536x1536 (RGBA8 sans extension requise)
+  _initThree() {
+    let renderer = null;
     try {
-      const tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.shadowSize, this.shadowSize, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-      const rb = gl.createRenderbuffer();
-      gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
-      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, this.shadowSize, this.shadowSize);
-
-      const fbo = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rb);
-
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
-        this.shadowFbo = fbo;
-        this.shadowTex = tex;
-        this.shadowDepthRb = rb;
-        this.shadowSupported = true;
-      } else {
-        gl.deleteFramebuffer(fbo);
-        gl.deleteRenderbuffer(rb);
-        gl.deleteTexture(tex);
-      }
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      renderer = new THREE.WebGLRenderer({
+        canvas: this.canvas,
+        antialias: true,
+        preserveDrawingBuffer: true,
+        powerPreference: "high-performance",
+      });
     } catch {
-      this.shadowSupported = false;
-    }
-
-    gl.enable(gl.DEPTH_TEST);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  }
-
-  _rebuildTerrainMesh(state) {
-    const gl = this.gl;
-    if (!gl) return;
-    if (!state.terrain || !Array.isArray(state.terrain.heights)) {
-      state.terrain = generateTerrainHeights("valley_river", 32);
-    }
-    const t = state.terrain;
-    const res = t.res || 32;
-    const gSize = (state.farm?.gridSize || 44) + 8;
-    const geom = buildTerrainAndHorizonMesh(t.heights, res, gSize);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshes.terrain.posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, geom.pos, gl.DYNAMIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshes.terrain.normBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, geom.norm, gl.DYNAMIC_DRAW);
-    this.meshes.terrain.count = geom.count;
-    t._dirty = false;
-  }
-
-  _rebuildRiverMesh(state) {
-    const gl = this.gl;
-    if (!gl) return;
-    const rivers = (state.structures || []).filter((s) => s.type === "river_seg");
-    if (!rivers.length) {
-      this.meshes.river.count = 0;
-      this.meshes.riverBed.count = 0;
+      this.renderer = null;
+      this.gl = null;
       return;
     }
 
-    const H = (x, z) => getTerrainHeight(state, x, z);
-    const posW = [], normW = [];
-    const posB = [], normB = [];
+    this.renderer = renderer;
+    this.gl = renderer.getContext();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 0.96;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.shadowSupported = Boolean(renderer.shadowMap.enabled && this.gl);
 
-    const emitRibbonStrip = (pts) => {
-      for (let i = 0; i < pts.length - 1; i++) {
-        const a = pts[i];
-        const b = pts[i + 1];
-        // Eau (CCW vers +Y)
-        posW.push(
-          a.lx, a.wy, a.lz, a.rx, a.wy, a.rz, b.rx, b.wy, b.rz,
-          a.lx, a.wy, a.lz, b.rx, b.wy, b.rz, b.lx, b.wy, b.lz
-        );
-        for (let k = 0; k < 6; k++) normW.push(0, 1, 0);
-        // Lit de galets immerge (legerement plus large et plus bas)
-        posB.push(
-          a.blx, a.by, a.blz, a.brx, a.by, a.brz, b.brx, b.by, b.brz,
-          a.blx, a.by, a.blz, b.brx, b.by, b.brz, b.blx, b.by, b.blz
-        );
-        for (let k = 0; k < 6; k++) normB.push(0, 1, 0);
-      }
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x9fc2e3);
+    this.scene.fog = new THREE.FogExp2(0xc4d8eb, 0.0036);
+    this.scene.environmentIntensity = 0.55;
+
+    this.threeCamera = new THREE.PerspectiveCamera(44, 1.6, 0.4, 340);
+
+    // Ciel physique Preetham + PMREM HDRI
+    const tintSkyShader = (skyObj) => {
+      skyObj.material.fragmentShader = skyObj.material.fragmentShader.replace(
+        "gl_FragColor = vec4( retColor, 1.0 );",
+        "gl_FragColor = vec4( clamp(pow(retColor, vec3(2.0)) * vec3(0.62, 0.76, 1.0), 0.0, 1.0), 1.0 );"
+      );
+      skyObj.material.needsUpdate = true;
     };
+    this.sky = new Sky();
+    this.sky.scale.setScalar(450);
+    tintSkyShader(this.sky);
+    const skyUni = this.sky.material.uniforms;
+    skyUni.turbidity.value = 3.2;
+    skyUni.rayleigh.value = 2.0;
+    skyUni.mieCoefficient.value = 0.003;
+    skyUni.mieDirectionalG.value = 0.82;
+    this.scene.add(this.sky);
 
-    const sorted = [...rivers].sort((a, b) => a.x - b.x);
-    const isMergedHorizontal =
-      sorted.length >= 2 &&
-      sorted.every((r) => Math.abs(r.rot || 0) < 0.2) &&
-      sorted.every((r, idx) => idx === 0 || Math.abs((r.x - (r.w || 12) * 0.5) - (sorted[idx - 1].x + (sorted[idx - 1].w || 12) * 0.5)) < 4.5);
-
-    if (isMergedHorizontal) {
-      const first = sorted[0];
-      const last = sorted[sorted.length - 1];
-      const xMin = first.x - (first.w || 12) * 0.5 - 5.5;
-      const xMax = last.x + (last.w || 12) * 0.5 + 5.5;
-      const steps = 48;
-      const sampleCenterZ = (x) => {
-        if (x <= first.x) return first.z - Math.sin(first.rot || 0) * (x - first.x);
-        if (x >= last.x) return last.z - Math.sin(last.rot || 0) * (x - last.x);
-        for (let j = 0; j < sorted.length - 1; j++) {
-          const s0 = sorted[j], s1 = sorted[j + 1];
-          if (x >= s0.x && x <= s1.x) {
-            const u = (x - s0.x) / Math.max(0.01, s1.x - s0.x);
-            const su = u * u * (3 - 2 * u);
-            return s0.z + (s1.z - s0.z) * su;
-          }
-        }
-        return first.z;
-      };
-      const avgD = sorted.reduce((acc, r) => acc + (r.d || 3.2), 0) / sorted.length;
-      const halfW = avgD * 0.5;
-      const raw = [];
-      for (let i = 0; i <= steps; i++) {
-        const x = xMin + (i / steps) * (xMax - xMin);
-        const cz = sampleCenterZ(x);
-        const yc = H(x, cz);
-        const yCore = Math.max(yc, H(x, cz - halfW * 0.28), H(x, cz + halfW * 0.28));
-        const yL = H(x, cz - halfW);
-        const yR = H(x, cz + halfW);
-        const bankRise = Math.min(yL, yR) - yc;
-        const wy = Math.max(yCore + 0.08, bankRise > 0.12 ? yc + Math.min(0.32, bankRise * 0.72) : yc + 0.1);
-        const span = bankRise > 0.12 ? halfW * 1.2 : halfW * 1.06;
-        raw.push({ x, cz, wy, yc, span });
-      }
-      // Lissage 3-points pour une pente d'eau parfaitement continue
-      const pts = raw.map((p, i) => {
-        const prev = raw[Math.max(0, i - 1)];
-        const next = raw[Math.min(raw.length - 1, i + 1)];
-        const wy = (prev.wy + p.wy * 2 + next.wy) * 0.25;
-        return {
-          lx: p.x, lz: p.cz - p.span,
-          rx: p.x, rz: p.cz + p.span,
-          wy,
-          blx: p.x, blz: p.cz - p.span * 1.12,
-          brx: p.x, brz: p.cz + p.span * 1.12,
-          by: wy - 0.18,
-        };
-      });
-      emitRibbonStrip(pts);
-    } else {
-      for (const s of sorted) {
-        const w = s.w || 12, d = s.d || 3.2, rot = s.rot || 0;
-        const cosR = Math.cos(rot), sinR = Math.sin(rot);
-        const steps = 12;
-        const halfW = d * 0.5;
-        const pts = [];
-        for (let i = 0; i <= steps; i++) {
-          const lx = (i / steps - 0.5) * w;
-          const cx = s.x + cosR * lx;
-          const cz = s.z - sinR * lx;
-          const yc = H(cx, cz);
-          const wy = yc + 0.06;
-          const nx = sinR, nz = cosR;
-          pts.push({
-            lx: cx - nx * halfW, lz: cz - nz * halfW,
-            rx: cx + nx * halfW, rz: cz + nz * halfW,
-            wy,
-            blx: cx - nx * halfW * 1.15, blz: cz - nz * halfW * 1.15,
-            brx: cx + nx * halfW * 1.15, brz: cz + nz * halfW * 1.15,
-            by: wy - 0.16,
-          });
-        }
-        emitRibbonStrip(pts);
-      }
+    this.envScene = new THREE.Scene();
+    this.envSky = new Sky();
+    this.envSky.scale.setScalar(10);
+    tintSkyShader(this.envSky);
+    this.envScene.add(this.envSky);
+    try {
+      this.pmremGenerator = new THREE.PMREMGenerator(renderer);
+      this.pmremGenerator.compileEquirectangularShader();
+    } catch {
+      this.pmremGenerator = null;
     }
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshes.river.posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(posW), gl.DYNAMIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshes.river.normBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normW), gl.DYNAMIC_DRAW);
-    this.meshes.river.count = posW.length / 3;
+    // Dôme étoilé nocturne
+    const starPos = [];
+    for (let i = 0; i < 420; i++) {
+      const th = (i * 2.39996) % (Math.PI * 2);
+      const ph = Math.acos(0.15 + ((i * 37) % 85) / 100);
+      const r = 195;
+      starPos.push(Math.sin(ph) * Math.cos(th) * r, Math.cos(ph) * r, Math.sin(ph) * Math.sin(th) * r);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPos, 3));
+    this.starMat = new THREE.PointsMaterial({ color: 0xf8fafc, size: 1.4, sizeAttenuation: false, transparent: true, opacity: 0 });
+    this.stars = new THREE.Points(starGeo, this.starMat);
+    this.scene.add(this.stars);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshes.riverBed.posBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(posB), gl.DYNAMIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.meshes.riverBed.normBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(normB), gl.DYNAMIC_DRAW);
-    this.meshes.riverBed.count = posB.length / 3;
+    // Eclairage 3 points + Soleil 2048x2048
+    this.sunLight = new THREE.DirectionalLight(0xfff5e4, 2.75);
+    this.sunLight.castShadow = true;
+    this.sunLight.shadow.mapSize.set(this.shadowSize, this.shadowSize);
+    this.sunLight.shadow.camera.near = 1;
+    this.sunLight.shadow.camera.far = 145;
+    this.sunLight.shadow.camera.left = -33;
+    this.sunLight.shadow.camera.right = 33;
+    this.sunLight.shadow.camera.top = 33;
+    this.sunLight.shadow.camera.bottom = -33;
+    this.sunLight.shadow.bias = -0.0004;
+    this.sunLight.shadow.normalBias = 0.04;
+    this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target);
+
+    this.hemiLight = new THREE.HemisphereLight(0xa3c9f2, 0x3b4d2b, 0.72);
+    this.scene.add(this.hemiLight);
+
+    this.fillLight = new THREE.DirectionalLight(0xbad4f5, 0.36);
+    this.fillLight.position.set(-22, 24, -18);
+    this.scene.add(this.fillLight);
+
+    // Ressources partagees PBR
+    this.geos = createSharedGeometries();
+    this.sharedGeoSet = new Set(Object.values(this.geos));
+    this.mats = createPbrMaterials(renderer);
+    this.gltfLoader = new GLTFLoader();
+
+    // Conteneurs de scene reactifs
+    this.terrainGroup = new THREE.Group();
+    this.grassGroup = new THREE.Group();
+    this.cadastralGroup = new THREE.Group();
+    this.staticGroup = new THREE.Group();
+    this.livestockGroup = new THREE.Group();
+    this.robotGroup = new THREE.Group();
+    this.rainGroup = new THREE.Group();
+    this.ghostGroup = new THREE.Group();
+    this.scene.add(
+      this.terrainGroup,
+      this.grassGroup,
+      this.cadastralGroup,
+      this.staticGroup,
+      this.livestockGroup,
+      this.robotGroup,
+      this.rainGroup,
+      this.ghostGroup
+    );
+
+    // Maillage fantome construction/sculpture + gouttes de pluie reutilisables
+    this.ghostMat = new THREE.MeshStandardMaterial({ color: 0x33f28c, emissive: 0x16a34a, emissiveIntensity: 0.45, transparent: true, opacity: 0.46, depthWrite: false });
+    this.ghostBox = new THREE.Mesh(this.geos.box, this.ghostMat);
+    this.ghostCyl = new THREE.Mesh(this.geos.cyl, this.ghostMat);
+    this.ghostBox.visible = false;
+    this.ghostCyl.visible = false;
+    this.ghostGroup.add(this.ghostBox, this.ghostCyl);
+
+    const dropGeo = new THREE.BoxGeometry(0.035, 0.6, 0.035);
+    const dropMat = new THREE.MeshBasicMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.55 });
+    this.rainGeo = dropGeo;
+    this.rainMat = dropMat;
+    this.rainDrops = [];
+    for (let i = 0; i < 85; i++) {
+      const dm = new THREE.Mesh(dropGeo, dropMat);
+      this.rainDrops.push(dm);
+      this.rainGroup.add(dm);
+    }
+    this.rainGroup.visible = false;
+  }
+
+  _disposeGroupGeometries(group) {
+    while (group.children.length > 0) {
+      const ch = group.children[0];
+      group.remove(ch);
+      ch.traverse((obj) => {
+        if (obj.geometry && !this.sharedGeoSet.has(obj.geometry)) {
+          obj.geometry.dispose();
+        }
+        if (obj.isInstancedMesh) {
+          obj.dispose?.();
+        }
+      });
+    }
+  }
+
+  loadGlbModel(url) {
+    if (!url || this.glbCache.has(url) || this.glbLoading.has(url)) return;
+    this.glbLoading.add(url);
+    this.gltfLoader.load(
+      url,
+      (gltf) => {
+        this.glbLoading.delete(url);
+        const model = gltf.scene || new THREE.Group();
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize(size);
+        box.getCenter(center);
+        const maxXZ = Math.max(0.01, size.x, size.z);
+        const normScale = 3.5 / maxXZ;
+
+        const wrap = new THREE.Group();
+        model.position.set(-center.x * normScale, -box.min.y * normScale, -center.z * normScale);
+        model.scale.multiplyScalar(normScale);
+        wrap.add(model);
+        this.glbCache.set(url, wrap);
+        this._staticSig = "";
+      },
+      undefined,
+      () => {
+        this.glbLoading.delete(url);
+      }
+    );
   }
 
   _bindEvents() {
@@ -639,11 +433,27 @@ export class Farm3DEngine {
   destroy() {
     if (this._onMouseUp) window.removeEventListener("mouseup", this._onMouseUp);
     if (this._onMouseMove) window.removeEventListener("mousemove", this._onMouseMove);
-    const gl = this.gl;
-    if (gl) {
-      if (this.shadowFbo) gl.deleteFramebuffer(this.shadowFbo);
-      if (this.shadowDepthRb) gl.deleteRenderbuffer(this.shadowDepthRb);
-      if (this.shadowTex) gl.deleteTexture(this.shadowTex);
+    if (this.renderer) {
+      this._disposeGroupGeometries(this.terrainGroup);
+      this._disposeGroupGeometries(this.grassGroup);
+      this._disposeGroupGeometries(this.cadastralGroup);
+      this._disposeGroupGeometries(this.staticGroup);
+      this._disposeGroupGeometries(this.livestockGroup);
+      this._disposeGroupGeometries(this.robotGroup);
+      this.sky?.geometry?.dispose();
+      this.sky?.material?.dispose();
+      this.envSky?.geometry?.dispose();
+      this.envSky?.material?.dispose();
+      this.stars?.geometry?.dispose();
+      this.starMat?.dispose();
+      this.ghostMat?.dispose();
+      this.rainGeo?.dispose();
+      this.rainMat?.dispose();
+      this.envTarget?.dispose();
+      this.pmremGenerator?.dispose();
+      disposeSharedGeometries(this.geos);
+      this.mats?.dispose();
+      this.renderer.dispose();
     }
   }
 
@@ -659,68 +469,28 @@ export class Farm3DEngine {
     }
   }
 
-  _getEye() {
+  _syncThreeCamera(aspect) {
     const { yaw, pitch, dist, targetX, targetZ } = this.camera;
     const baseH = this.lastState ? getTerrainHeight(this.lastState, targetX, targetZ) : 0;
-    return [
-      targetX + Math.sin(yaw) * Math.cos(pitch) * dist,
-      baseH + Math.sin(pitch) * dist,
-      targetZ + Math.cos(yaw) * Math.cos(pitch) * dist,
-    ];
-  }
+    const eyeX = targetX + Math.sin(yaw) * Math.cos(pitch) * dist;
+    const eyeY = baseH + Math.sin(pitch) * dist;
+    const eyeZ = targetZ + Math.cos(yaw) * Math.cos(pitch) * dist;
 
-  _getMatrices() {
-    const w = this.canvas.width || 800;
-    const h = this.canvas.height || 500;
-    const proj = mat4Perspective((44 * Math.PI) / 180, w / h, 0.4, 280);
-    const eye = this._getEye();
-    const baseH = this.lastState ? getTerrainHeight(this.lastState, this.camera.targetX, this.camera.targetZ) : 0;
-    const view = mat4LookAt(eye, [this.camera.targetX, baseH + 0.9, this.camera.targetZ], [0, 1, 0]);
-    return { proj, view, eye };
-  }
-
-  _invert4(m) {
-    const inv = new Float32Array(16);
-    inv[0] = m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
-    inv[4] = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
-    inv[8] = m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
-    inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
-    inv[1] = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
-    inv[5] = m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
-    inv[9] = -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
-    inv[13] = m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
-    inv[2] = m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
-    inv[6] = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
-    inv[10] = m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
-    inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
-    inv[3] = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
-    inv[7] = m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
-    inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9] + m[4]*m[1]*m[11] - m[4]*m[3]*m[9] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
-    inv[15] = m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10] + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
-    let det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
-    if (Math.abs(det) < 1e-8) return null;
-    det = 1 / det;
-    for (let i = 0; i < 16; i++) inv[i] *= det;
-    return inv;
+    this.threeCamera.aspect = Math.max(0.1, aspect);
+    this.threeCamera.position.set(eyeX, eyeY, eyeZ);
+    this.threeCamera.lookAt(targetX, baseH + 0.9, targetZ);
+    this.threeCamera.updateMatrixWorld(true);
+    this.threeCamera.updateProjectionMatrix();
   }
 
   _screenRay(nx, ny) {
-    const { proj, view, eye } = this._getMatrices();
-    const vp = mat4Mul(proj, view);
-    const inv = this._invert4(vp);
-    if (!inv) return null;
-
-    const mulPt = (x, y, z) => {
-      const rx = inv[0] * x + inv[4] * y + inv[8] * z + inv[12];
-      const ry = inv[1] * x + inv[5] * y + inv[9] * z + inv[13];
-      const rz = inv[2] * x + inv[6] * y + inv[10] * z + inv[14];
-      const rw = inv[3] * x + inv[7] * y + inv[11] * z + inv[15];
-      return [rx / rw, ry / rw, rz / rw];
-    };
-    const far = mulPt(nx, ny, 1);
-    let dx = far[0] - eye[0], dy = far[1] - eye[1], dz = far[2] - eye[2];
-    const len = Math.hypot(dx, dy, dz) || 1;
-    return { origin: eye, dir: [dx / len, dy / len, dz / len] };
+    const rect = this.canvas.getBoundingClientRect();
+    const aspect = (rect.width || this.canvas.width || 800) / (rect.height || this.canvas.height || 500);
+    this._syncThreeCamera(aspect);
+    const farPt = new THREE.Vector3(nx, ny, 0.5).unproject(this.threeCamera);
+    const origin = this.threeCamera.position;
+    const dir = farPt.sub(origin).normalize();
+    return { origin: [origin.x, origin.y, origin.z], dir: [dir.x, dir.y, dir.z] };
   }
 
   _rayToGround(nx, ny) {
@@ -791,1200 +561,406 @@ export class Farm3DEngine {
     return best;
   }
 
-  _projectPoint(vp, x, y, z, w, h) {
-    const cx = vp[0] * x + vp[4] * y + vp[8] * z + vp[12];
-    const cy = vp[1] * x + vp[5] * y + vp[9] * z + vp[13];
-    const cw = vp[3] * x + vp[7] * y + vp[11] * z + vp[15];
-    if (cw <= 0.1) return null;
+  _projectPoint(x, y, z, w, h) {
+    const v = new THREE.Vector3(x, y, z).project(this.threeCamera);
+    if (v.z < -1 || v.z > 1) return null;
     return {
-      x: ((cx / cw) * 0.5 + 0.5) * w,
-      y: ((-cy / cw) * 0.5 + 0.5) * h,
+      x: (v.x * 0.5 + 0.5) * w,
+      y: (-v.y * 0.5 + 0.5) * h,
     };
   }
 
+  _updateAtmosphere(state, sun) {
+    const rainMm = state.weather?.current?.rainMm || 0;
+    const isRain = rainMm > 0.5;
+    const elRad = ((sun.elevationDeg ?? 25) * Math.PI) / 180;
+    const el = Math.max(-0.25, Math.min(1, Math.sin(elRad)));
+    const xzLen = Math.hypot(sun.x, sun.z) || 1;
+    const hScale = Math.sqrt(Math.max(0.01, 1 - el * el));
+    const dirX = (sun.x / xzLen) * hScale;
+    const dirZ = (sun.z / xzLen) * hScale;
+    const skyPos = new THREE.Vector3(dirX * 100, el * 100, dirZ * 100);
+    const dusk = el > -0.05 && el < 0.25 ? 1 - Math.abs(el - 0.1) / 0.16 : 0;
+
+    // Mise a jour ciel Preetham
+    const skyUni = this.sky.material.uniforms;
+    skyUni.sunPosition.value.copy(el < -0.04 ? new THREE.Vector3(skyPos.x, -4, skyPos.z) : skyPos);
+    skyUni.turbidity.value = isRain ? 9.0 : dusk > 0.1 ? 6.5 : 2.2;
+    skyUni.rayleigh.value = sun.isDay ? (isRain ? 0.6 : 2.2 + dusk * 1.2) : 0.15;
+    skyUni.mieCoefficient.value = 0.003;
+    this.sky.visible = el > -0.14;
+
+    const envUni = this.envSky.material.uniforms;
+    envUni.sunPosition.value.copy(skyUni.sunPosition.value);
+    envUni.turbidity.value = skyUni.turbidity.value;
+    envUni.rayleigh.value = skyUni.rayleigh.value;
+    envUni.mieCoefficient.value = skyUni.mieCoefficient.value;
+
+    const bucket = `${Math.round((state.simulation.hourOfDay || 10.5) * 2)}|${isRain ? 1 : 0}`;
+    if (bucket !== this._envBucket && this.pmremGenerator) {
+      this._envBucket = bucket;
+      try {
+        const nextEnv = this.pmremGenerator.fromScene(this.envScene, 0.04);
+        this.envTarget?.dispose();
+        this.envTarget = nextEnv;
+        this.scene.environment = nextEnv.texture;
+      } catch {}
+    }
+
+    // Lumieres & brouillard synchronises
+    const sunLen = Math.hypot(sun.x, sun.y, sun.z) || 1;
+    this.sunLight.castShadow = this.shadowsEnabled !== false && sun.isDay;
+    this.renderer.shadowMap.enabled = this.shadowsEnabled !== false;
+    this.sunLight.position.set((sun.x / sunLen) * 62, Math.max(8, (sun.y / sunLen) * 62), (sun.z / sunLen) * 62);
+
+    if (sun.isDay) {
+      this.sunLight.color.setRGB(1.0, 0.9 + el * 0.08, 0.74 + el * 0.22);
+      this.sunLight.intensity = isRain ? 1.3 : 2.2 + el * 0.9;
+      this.hemiLight.color.setHex(isRain ? 0x8ea4bd : 0x8fc0f2);
+      this.hemiLight.groundColor.setHex(0x2f4022);
+      this.hemiLight.intensity = isRain ? 0.65 : 0.55;
+      this.fillLight.intensity = 0.3;
+      this.renderer.toneMappingExposure = isRain ? 0.78 : 0.82;
+    } else {
+      this.sunLight.color.setHex(0x6e8ec4);
+      this.sunLight.intensity = 0.4;
+      this.hemiLight.color.setHex(0x283f6b);
+      this.hemiLight.groundColor.setHex(0x162218);
+      this.hemiLight.intensity = 0.42;
+      this.fillLight.intensity = 0.15;
+      this.renderer.toneMappingExposure = 0.8;
+    }
+
+    const fogHex = !sun.isDay ? 0x0b1326 : isRain ? 0x7b8ea3 : dusk > 0.25 ? 0xd9b08e : 0xa9cceb;
+    this.scene.background.setHex(fogHex);
+    this.scene.fog.color.setHex(fogHex);
+    this.scene.fog.density = isRain ? 0.0085 : 0.0028;
+
+    this.starMat.opacity = sun.isDay ? 0 : Math.min(0.92, (-el + 0.04) * 5.0);
+    this.stars.visible = !sun.isDay;
+  }
+
   render(state, forecastSnapshot, dt = 0.016) {
+    if (!this.renderer || !state) return [];
     this.elapsed += dt;
     this.lastState = state;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const rect = this.canvas.getBoundingClientRect();
-    const targetW = Math.max(300, Math.round((rect.width || 960) * dpr));
-    const targetH = Math.max(200, Math.round((rect.height || 580) * dpr));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const targetW = Math.max(320, Math.round((rect.width || this.canvas.width || 960) * dpr));
+    const targetH = Math.max(220, Math.round((rect.height || this.canvas.height || 580) * dpr));
     if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
-      this.canvas.width = targetW;
-      this.canvas.height = targetH;
+      this.renderer.setPixelRatio(dpr);
+      this.renderer.setSize(Math.round(rect.width || targetW / dpr), Math.round(rect.height || targetH / dpr), false);
     }
 
-    if (!this.gl) {
-      this._render2DFallback(state);
-      return [];
-    }
-
-    const gl = this.gl;
-
-    // Soleil saisonnier & meteo du jour simule
+    const lat = state.farm?.location?.lat ?? 44.93;
     const now = new Date();
-    const startYear = new Date(now.getFullYear(), 0, 0);
-    const baseDoy = Math.floor((now - startYear) / 86400000);
-    const dayOffset = state.simulation?.dayOffset || 0;
-    const dayOfYear = ((baseDoy + dayOffset - 1) % 365) + 1;
-    const sun = computeSunPosition(state.farm?.location?.lat ?? 45, state.simulation?.hourOfDay ?? 10.5, dayOfYear);
-
-    const daySnap = forecastSnapshot?.daily?.[Math.min(dayOffset, Math.max(0, (forecastSnapshot?.daily?.length || 1) - 1))];
-    const rainMm = dayOffset > 0 ? (daySnap?.rainMm || 0) : (state.weather?.current?.rainMm || 0);
-    const rainAmt = Math.max(0, Math.min(1, rainMm / 8));
-
-    const sLen = Math.hypot(sun.x, sun.y, sun.z) || 1;
-    const sunDir = [sun.x / sLen, sun.y / sLen, sun.z / sLen];
-    const elSin = Math.sin((sun.elevationDeg * Math.PI) / 180);
-    const skySunDirLen = Math.hypot(sunDir[0], elSin, sunDir[2]) || 1;
-    const skySunDir = [sunDir[0] / skySunDirLen, elSin / skySunDirLen, sunDir[2] / skySunDirLen];
-
-    const golden = Math.max(0, Math.min(1, 1 - Math.abs(elSin - 0.12) * 3.0)) * (elSin > -0.08 ? 1 : 0);
-    const dayAmt = smoothstep(-0.08, 0.25, elSin);
-    const skyColor = lerpColor(
-      [0.038, 0.06, 0.12],
-      lerpColor([0.14, 0.42, 0.80], [0.24, 0.29, 0.36], rainAmt * 0.75),
-      dayAmt
-    );
-    let dayHoriz = lerpColor([0.48, 0.68, 0.88], [0.42, 0.47, 0.52], rainAmt * 0.7);
-    dayHoriz = lerpColor(dayHoriz, [0.95, 0.56, 0.30], golden * 0.62 * (1 - rainAmt * 0.65));
-    const horizonColor = lerpColor([0.038, 0.06, 0.11], dayHoriz, dayAmt);
-    const sunColor = sun.isDay
-      ? lerpColor([1.0, 0.54, 0.24], [1.0, 0.97, 0.90], smoothstep(0.03, 0.42, elSin))
-      : [0.35, 0.48, 0.74];
-
-    // Reconstruction du maillage de relief 3D et de la riviere si modifies
-    const t = state.terrain;
-    const hLast = t?.heights ? t.heights[t.heights.length - 1] : 0;
-    const hMid = t?.heights ? t.heights[Math.floor(t.heights.length / 2)] : 0;
-    const rivKey = (state.structures || []).filter((s) => s.type === "river_seg").map((r) => `${r.x},${r.z},${r.w},${r.d},${r.rot}`).join("|");
-    const tKey = `${state.farm.presetId}_${state.farm.gridSize}_${t?.presetId}_${t?._version || 0}_${t?.heights?.[0]}_${hMid}_${hLast}_${rivKey}`;
-    if (!this.meshes.terrain.count || t?._dirty || this.terrainCacheKey !== tKey) {
-      this._rebuildTerrainMesh(state);
-      this._rebuildRiverMesh(state);
-      this.terrainCacheKey = tKey;
-    }
-
-    // Collecte des appels de rendu dans les files opaque / translucide
-    const opaqueQueue = [];
-    const transQueue = [];
-
-    const pushItem = (meshName, model, rgba, emissive = 0, matType = 0, opts = {}) => {
-      const m = this.meshes[meshName];
-      if (!m || !m.count) return;
-      const item = {
-        meshName,
-        mesh: m,
-        model,
-        rgba,
-        emissive,
-        matType,
-        windAmt: opts.windAmt || 0,
-        castShadow: opts.castShadow !== false,
-      };
-      if (rgba[3] < 0.985) {
-        item.castShadow = opts.castShadow === true;
-        transQueue.push(item);
-      } else {
-        opaqueQueue.push(item);
-      }
-    };
-
-    const drawMesh = (meshName, x, y, z, rx, ry, rz, sx, sy, sz, rgba, emissive = 0, matType = 0, opts = {}) => {
-      pushItem(meshName, mat4Transform(x, y, z, rx, ry, rz, sx, sy, sz), rgba, emissive, matType, opts);
-    };
-
-    const makeLocal = (cx, cy, cz, rot = 0) => {
-      const baseMat = mat4Transform(cx, cy, cz, 0, rot, 0, 1, 1, 1);
-      return (meshName, lx, ly, lz, lrx, lry, lrz, sx, sy, sz, rgba, emissive = 0, matType = 0, opts = {}) => {
-        const model = mat4Mul(baseMat, mat4Transform(lx, ly, lz, lrx, lry, lrz, sx, sy, sz));
-        pushItem(meshName, model, rgba, emissive, matType, opts);
-      };
-    };
-
-    // Helper pivot hanche pour pattes animees
-    const drawPivotBox = (baseMat, lx, hipY, lz, swingX, w, len, d, rgba, matType = MAT.FUR) => {
-      const pivotM = mat4Mul(baseMat, mat4Transform(lx, hipY, lz, swingX, 0, 0, 1, 1, 1));
-      const boxM = mat4Mul(pivotM, mat4Transform(0, -len, 0, 0, 0, 0, w, len, d));
-      pushItem("box", boxM, rgba, 0, matType, {});
-    };
-
-    // Terrain principal + collines d'horizon + ruban riviere continu + limites cadastrales jaunes
-    drawMesh("terrain", 0, 0, 0, 0, 0, 0, 1, 1, 1, [0.27, 0.48, 0.21, 1], 0, MAT.TERRAIN, { castShadow: false });
-    if (this.meshes.riverBed.count) {
-      drawMesh("riverBed", 0, 0, 0, 0, 0, 0, 1, 1, 1, [0.46, 0.41, 0.34, 1], 0, MAT.GRAVEL, { castShadow: false });
-    }
-    if (this.meshes.river.count) {
-      drawMesh("river", 0, 0, 0, 0, 0, 0, 1, 1, 1, [0.06, 0.45, 0.7, 0.9], 0, MAT.WATER, { castShadow: false });
-    }
+    const startYr = new Date(now.getFullYear(), 0, 0);
+    const doy = Math.floor((now - startYr) / 86400000) + (state.simulation.dayOffset || 0);
+    const sun = computeSunPosition(lat, state.simulation.hourOfDay || 10.5, doy);
+    this._updateAtmosphere(state, sun);
 
     const H = (x, z) => getTerrainHeight(state, x, z);
-    const { proj, view, eye } = this._getMatrices();
-    const vp = mat4Mul(proj, view);
-    const cssW = rect.width || 960;
-    const cssH = rect.height || 580;
 
-    this.hitBoxes = [];
-    this.arPins = [];
-
-    const addArPin = (id, label, x, y, z, warn = false) => {
-      const pt = this._projectPoint(vp, x, y, z, cssW, cssH);
-      if (pt && pt.x > 0 && pt.x < cssW && pt.y > 0 && pt.y < cssH) {
-        this.arPins.push({ id, label, x: pt.x, y: pt.y, warn });
-      }
-    };
-
-    const parcels = state.farm?.cadastralParcels || [];
-    for (const parcel of parcels) {
-      const pts = parcel.points || [];
-      if (pts.length < 3) continue;
-      let sumX = 0, sumZ = 0;
-      for (let i = 0; i < pts.length; i++) {
-        const [x0, z0] = pts[i];
-        const [x1, z1] = pts[(i + 1) % pts.length];
-        sumX += x0; sumZ += z0;
-        const dx = x1 - x0, dz = z1 - z0;
-        const edgeLen = Math.hypot(dx, dz);
-        if (edgeLen < 0.1) continue;
-        const edgeRot = Math.atan2(-dz, dx);
-        const segs = Math.max(1, Math.ceil(edgeLen / 4.5));
-        for (let sIdx = 0; sIdx < segs; sIdx++) {
-          const t = (sIdx + 0.5) / segs;
-          const mx = x0 + dx * t;
-          const mz = z0 + dz * t;
-          drawMesh("box", mx, H(mx, mz) + 0.04, mz, 0, edgeRot, 0, edgeLen / segs + 0.12, 0.08, 0.24, [0.95, 0.78, 0.14, 0.92], 0.22, MAT.DEFAULT, { castShadow: false });
-        }
-        drawMesh("cyl", x0, H(x0, z0), z0, 0, 0, 0, 0.22, 0.34, 0.22, [0.98, 0.82, 0.16, 1], 0.25, MAT.METAL);
-      }
-      const cx = sumX / pts.length;
-      const cz = sumZ / pts.length;
-      addArPin(`CAD-${parcel.id}`, `🟨 ${parcel.label || parcel.id}`, cx, H(cx, cz) + 2.4, cz, false);
+    // 1. Terrain + riviere + arbres lointains
+    const riverSig = (state.structures || []).filter((s) => s.type === "river_seg").map((r) => `${r.id}:${r.x}:${r.z}:${r.w}:${r.d}:${r.rot}`).join("|");
+    const terrainSig = `${state.terrain?.presetId}|${state.terrain?._version || 0}|${state.farm?.gridSize}|${riverSig}`;
+    if (terrainSig !== this._terrainSig || state.terrain?._dirty) {
+      this._terrainSig = terrainSig;
+      if (state.terrain) state.terrain._dirty = false;
+      this._disposeGroupGeometries(this.terrainGroup);
+      this.terrainGroup.add(buildTerrainMeshPbr(state, this.mats));
+      const riv = buildRiverPbr(state, this.mats, H);
+      if (riv.children.length) this.terrainGroup.add(riv);
+      this.terrainGroup.add(buildPerimeterTreesPbr(state, this.geos, this.mats));
     }
 
-    const windSpeed = state.weather?.current?.windKmh || 12;
-    const foliageWind = 0.22 + Math.min(1.2, windSpeed * 0.02);
-    const nightGlow = sun.isDay ? 0.08 : 0.72;
-
-    // --- 1. Arbres & bosquets de la campagne lointaine ---
-    const gSize = (state.farm?.gridSize || 44) + 8;
-    const tHeights = state.terrain?.heights || [];
-    const tRes = state.terrain?.res || 32;
-    for (let i = 0; i < 48; i++) {
-      const ang = i * 2.39996 + 0.4;
-      const rad = 28 + ((i * 7.3) % 30);
-      const tx = Math.cos(ang) * rad;
-      const tz = Math.sin(ang) * rad;
-      if (Math.max(Math.abs(tx), Math.abs(tz)) < gSize * 0.54) continue;
-      if (tz > 7 && tz < 21) continue; // preserve le couloir riviere
-      const ty = sampleExtendedTerrainHeight(tHeights, tRes, gSize, tx, tz);
-      const sc = 0.9 + ((i * 13) % 7) * 0.14;
-      drawMesh("cyl", tx, ty - 0.3, tz, 0, 0, 0, 0.38 * sc, 2.1 * sc, 0.38 * sc, [0.38, 0.25, 0.14, 1], 0, MAT.WOOD);
-      const gShade = 0.14 + ((i * 5) % 4) * 0.025;
-      drawMesh("sphere", tx, ty + 1.4 * sc, tz, 0, 0, 0, 2.8 * sc, 2.4 * sc, 2.8 * sc, [gShade, 0.46 + (i % 3) * 0.04, 0.18, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
-      drawMesh("sphere", tx + 0.6 * sc, ty + 2.2 * sc, tz - 0.4 * sc, 0, 0, 0, 2.1 * sc, 1.9 * sc, 2.1 * sc, [gShade + 0.04, 0.52, 0.2, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
-      drawMesh("leafCluster", tx, ty + 1.3 * sc, tz, 0, i * 0.7, 0, 3.0 * sc, 2.6 * sc, 3.0 * sc, [gShade + 0.02, 0.5, 0.19, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
+    // 2. Herbe instanciee
+    const layoutSig = `${(state.plots || []).map((p) => `${p.id}:${p.x}:${p.z}:${p.w}:${p.d}:${p.rot}`).join(";")}|${(state.structures || []).map((s) => `${s.id}:${s.x}:${s.z}:${s.w}:${s.d}:${s.rot}`).join(";")}`;
+    const grassSig = `${this._terrainSig}|${layoutSig}`;
+    if (grassSig !== this._grassSig) {
+      this._grassSig = grassSig;
+      this._disposeGroupGeometries(this.grassGroup);
+      this.grassGroup.add(buildInstancedGrassPbr(state, this.geos, this.mats, H));
     }
 
-    // --- 2. Rendu detaille des parcelles et cultures en 3D ---
-    const snapMap = new Map((forecastSnapshot?.plotSnapshots || []).map((s) => [s.id, s]));
-    const opaquePlots = state.plots.filter((p) => p.zone !== "Serre");
-    const ghPlots = state.plots.filter((p) => p.zone === "Serre");
-
-    const getPlotTint = (p, snap) => {
-      const moist = snap?.moisturePct ?? p.moisturePct;
-      const health = snap?.healthPct ?? p.healthPct;
-      const risk = snap?.diseaseRisk ?? p.diseaseRisk;
-      if (this.overlay === "moisture") {
-        return moist < 35 ? [0.92, 0.32, 0.22] : moist < 60 ? [0.28, 0.78, 0.38] : [0.14, 0.58, 0.95];
-      }
-      if (this.overlay === "health") {
-        return health > 82 ? [0.16, 0.82, 0.36] : health > 65 ? [0.9, 0.72, 0.2] : [0.9, 0.25, 0.25];
-      }
-      if (this.overlay === "disease") {
-        return risk > 50 ? [0.95, 0.22, 0.35] : risk > 25 ? [0.95, 0.65, 0.15] : [0.22, 0.75, 0.45];
-      }
-      return null;
-    };
-
-    const drawPlotRealistic = (p, snap) => {
-      const w = p.w || 7, d = p.d || 2.3, rot = p.rot || 0;
-      const baseY = H(p.x, p.z);
-      const progress = Math.max(0.14, (snap?.progressPct ?? 55) / 100);
-      const tint = getPlotTint(p, snap);
-      const crop = getCropById(p.cropId);
-      const shape = crop.shape || "leafy_head";
-      const isSelected = this.selectedId === p.id;
-      const emSel = isSelected ? 0.28 : 0;
-
-      // Butte / Planche de terre travaillee + bordures bois maraicheres + goutte-a-goutte
-      const moistRatio = (snap?.moisturePct ?? p.moisturePct) / 100;
-      const soilRgb = tint || lerpColor([0.44, 0.31, 0.20], [0.21, 0.14, 0.09], moistRatio);
-      drawMesh("box", p.x, baseY - 0.12, p.z, 0, rot, 0, w, 0.34, d, [...soilRgb, 1], emSel, MAT.SOIL, { castShadow: false });
-
-      const localPlot = makeLocal(p.x, baseY, p.z, rot);
-      if (p.zone !== "Serre") {
-        // Bordures en bois sur planches maraicheres
-        localPlot("box", 0, 0.02, d * 0.5 + 0.03, 0, 0, 0, w + 0.08, 0.2, 0.07, [0.46, 0.32, 0.18, 1], 0, MAT.WOOD);
-        localPlot("box", 0, 0.02, -d * 0.5 - 0.03, 0, 0, 0, w + 0.08, 0.2, 0.07, [0.46, 0.32, 0.18, 1], 0, MAT.WOOD);
-      }
-
-      // Lignes noires de goutte-a-goutte
-      const nRows = 3;
-      const nCols = Math.max(6, Math.min(10, Math.round(w * 0.9)));
-      for (let r = 0; r < nRows; r++) {
-        const localZ = ((r + 0.5) / nRows - 0.5) * (d * 0.76);
-        localPlot("cyl", w * 0.44, 0.23, localZ, 0, 0, Math.PI / 2, 0.04, w * 0.88, 0.04, [0.14, 0.15, 0.17, 1], 0, MAT.DEFAULT, { castShadow: false });
-      }
-
-      const cosR = Math.cos(rot), sinR = Math.sin(rot);
-      for (let r = 0; r < nRows; r++) {
-        const localZ = ((r + 0.5) / nRows - 0.5) * (d * 0.76);
-        for (let c = 0; c < nCols; c++) {
-          const jitter = Math.sin(c * 1.9 + r * 3.1) * 0.08;
-          const localX = ((c + 0.5) / nCols - 0.5) * (w * 0.86) + jitter;
-          const wx = p.x + cosR * localX + sinR * localZ;
-          const wz = p.z - sinR * localX + cosR * localZ;
-          const py = H(wx, wz) + 0.21;
-
-          if (tint) {
-            drawMesh("sphere", wx, py, wz, 0, rot, 0, 0.56, 0.55 * progress + 0.18, 0.5, [...tint, 1], emSel, MAT.FOLIAGE);
-            continue;
-          }
-
-          if (shape === "staked_fruit") {
-            const hPlant = 0.42 + progress * 1.25;
-            drawMesh("cyl", wx, py, wz, 0, 0, 0, 0.06, hPlant + 0.22, 0.06, [0.54, 0.37, 0.21, 1], 0, MAT.WOOD);
-            drawMesh("leafCluster", wx, py + 0.06, wz, 0, c * 0.8, 0, 0.68, hPlant * 0.88, 0.68, [0.16, 0.54, 0.2, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.35 });
-            drawMesh("sphere", wx, py + hPlant * 0.35, wz, 0, 0, 0, 0.42, hPlant * 0.58, 0.42, [0.18, 0.60, 0.22, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.35 });
-            if (progress > 0.42) {
-              drawMesh("sphere", wx + 0.13, py + hPlant * 0.55, wz + 0.1, 0, 0, 0, 0.14, 0.14, 0.14, [0.92, 0.16, 0.13, 1], 0.05);
-              drawMesh("sphere", wx - 0.12, py + hPlant * 0.38, wz - 0.08, 0, 0, 0, 0.13, 0.13, 0.13, [0.94, 0.24, 0.12, 1], 0.05);
-              drawMesh("sphere", wx + 0.04, py + hPlant * 0.72, wz - 0.11, 0, 0, 0, 0.11, 0.11, 0.11, [0.95, 0.42, 0.12, 1], 0.05);
-            }
-          } else if (shape === "tall_corn") {
-            const hCorn = 0.45 + progress * 1.45;
-            drawMesh("cyl", wx, py, wz, 0, 0, 0, 0.09, hCorn, 0.09, [0.22, 0.62, 0.22, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind * 0.8 });
-            drawMesh("leafCluster", wx, py + hCorn * 0.32, wz, 0, c + r, 0, 0.78, hCorn * 0.58, 0.78, [0.24, 0.66, 0.23, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind });
-            if (progress > 0.52) {
-              drawMesh("cyl", wx + 0.08, py + hCorn * 0.54, wz, 0, 0, -0.25, 0.12, 0.26, 0.12, [0.98, 0.82, 0.18, 1], 0.06);
-              drawMesh("cone", wx, py + hCorn * 0.96, wz, 0, 0, 0, 0.16, 0.24, 0.16, [0.92, 0.84, 0.45, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
-            }
-          } else if (shape === "sunflower") {
-            const hSun = 0.45 + progress * 1.3;
-            drawMesh("cyl", wx, py, wz, 0, 0, 0, 0.08, hSun, 0.08, [0.2, 0.58, 0.22, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind * 0.7 });
-            drawMesh("leafCluster", wx, py + hSun * 0.25, wz, 0, c, 0, 0.58, hSun * 0.5, 0.58, [0.2, 0.62, 0.24, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind * 0.6 });
-            if (progress > 0.38) {
-              drawMesh("cyl", wx, py + hSun, wz, 0.45, rot, 0, 0.48, 0.07, 0.48, [0.98, 0.8, 0.1, 1], 0.1);
-              drawMesh("sphere", wx, py + hSun + 0.01, wz + 0.02, 0.45, rot, 0, 0.24, 0.1, 0.24, [0.28, 0.15, 0.07, 1]);
-            }
-          } else if (shape === "wheat_golden") {
-            const hW = 0.28 + progress * 0.72;
-            const colW = lerpColor([0.3, 0.68, 0.22], [0.92, 0.76, 0.24], progress);
-            drawMesh("leafCluster", wx, py, wz, 0, rot + c * 0.5, 0, 0.88, hW, 0.55, [...colW, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 1.15 });
-          } else if (shape === "root_top") {
-            const rootCol = crop.id === "radis" ? [0.92, 0.2, 0.35, 1] : [0.95, 0.46, 0.12, 1];
-            drawMesh("sphere", wx, py - 0.03, wz, 0, 0, 0, 0.16, 0.14, 0.16, rootCol);
-            drawMesh("leafCluster", wx, py + 0.05, wz, 0, c * 0.9, 0, 0.52, 0.26 + progress * 0.32, 0.52, [0.18, 0.7, 0.25, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.5 });
-          } else if (shape === "allium") {
-            const bulbCol = crop.id === "oignon" ? [0.88, 0.66, 0.32, 1] : [0.92, 0.94, 0.88, 1];
-            drawMesh("sphere", wx, py - 0.02, wz, 0, 0, 0, 0.18, 0.18, 0.18, bulbCol);
-            drawMesh("leafCluster", wx, py + 0.08, wz, 0, c * 0.6, 0, 0.36, 0.35 + progress * 0.38, 0.36, [0.14, 0.58, 0.42, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.6 });
-          } else if (shape === "berry_mound") {
-            drawMesh("leafCluster", wx, py, wz, 0, c * 0.7, 0, 0.55, 0.26 + progress * 0.12, 0.5, [0.16, 0.6, 0.22, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.3 });
-            if (progress > 0.35) {
-              drawMesh("sphere", wx + 0.12, py + 0.14, wz + 0.08, 0, 0, 0, 0.1, 0.11, 0.1, [0.92, 0.12, 0.22, 1], 0.08);
-              drawMesh("sphere", wx - 0.1, py + 0.13, wz - 0.06, 0, 0, 0, 0.09, 0.1, 0.09, [0.96, 0.2, 0.28, 1], 0.08);
-            }
-          } else if (shape === "trellis_vine") {
-            drawMesh("cyl", wx, py, wz, 0, 0, 0, 0.07, 1.25, 0.07, [0.44, 0.29, 0.16, 1], 0, MAT.WOOD);
-            drawMesh("box", wx, py + 0.65, wz, 0, rot, 0, 0.95, 0.03, 0.03, [0.6, 0.64, 0.68, 1], 0, MAT.METAL);
-            drawMesh("sphere", wx, py + 0.38, wz, 0, rot, 0, 0.75, 0.58, 0.42, [0.18, 0.56, 0.2, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.4 });
-            if (progress > 0.45) {
-              drawMesh("sphere", wx + 0.1, py + 0.32, wz + 0.14, 0, 0, 0, 0.13, 0.19, 0.13, [0.44, 0.16, 0.66, 1], 0.05);
-              drawMesh("sphere", wx - 0.12, py + 0.34, wz - 0.12, 0, 0, 0, 0.12, 0.18, 0.12, [0.48, 0.2, 0.7, 1], 0.05);
-            }
-          } else if (shape === "sprawling_squash") {
-            drawMesh("leafCluster", wx, py, wz, 0, c * 0.7, 0, 0.78, 0.38 + progress * 0.18, 0.74, [0.15, 0.56, 0.21, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.3 });
-            drawMesh("sphere", wx + 0.16, py + 0.22, wz, 0, 0, 0, 0.15, 0.13, 0.15, [0.98, 0.82, 0.12, 1], 0.08);
-            if (progress > 0.45) {
-              drawMesh("cyl", wx - 0.1, py + 0.08, wz + 0.12, Math.PI / 2, c, 0, 0.1, 0.3, 0.1, [0.14, 0.45, 0.18, 1]);
-            }
-          } else if (shape === "bush_pods") {
-            const hBush = 0.25 + progress * 0.42;
-            drawMesh("leafCluster", wx, py, wz, 0, c * 0.6, 0, 0.62, hBush, 0.62, [0.18, 0.64, 0.24, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.45 });
-            drawMesh("sphere", wx, py + 0.08, wz, 0, 0, 0, 0.44, hBush * 0.78, 0.44, [0.22, 0.68, 0.26, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.4 });
-            if (crop.id === "pomme_de_terre" && progress > 0.55) {
-              drawMesh("sphere", wx, py + hBush + 0.04, wz, 0, 0, 0, 0.11, 0.09, 0.11, [0.94, 0.92, 0.98, 1], 0.08);
-            }
-          } else if (shape === "meadow_clover" || shape === "purple_flowers") {
-            const hCov = 0.22 + progress * 0.42;
-            const colCov = shape === "purple_flowers" ? [0.2, 0.62, 0.26, 1] : [0.22, 0.7, 0.28, 1];
-            drawMesh("leafCluster", wx, py, wz, 0, c * 0.9, 0, 0.72, hCov, 0.72, colCov, emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.65 });
-            if (shape === "purple_flowers" && progress > 0.35) {
-              drawMesh("sphere", wx + 0.06, py + hCov * 0.85, wz, 0, 0, 0, 0.16, 0.16, 0.16, [0.64, 0.36, 0.88, 1], 0.1);
-            }
-          } else {
-            // Laitue / Chou / Epinard : rosettes rondes bien formees
-            const headCol = crop.id === "chou"
-              ? [0.16, 0.54, 0.34, 1]
-              : crop.id === "epinard"
-                ? [0.12, 0.58, 0.26, 1]
-                : [0.46, 0.82, 0.22, 1];
-            const sz = 0.28 + progress * 0.28;
-            drawMesh("leafCluster", wx, py, wz, 0, c, 0, sz * 1.4, sz * 0.85, sz * 1.4, headCol, emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.25 });
-            drawMesh("sphere", wx, py + 0.02, wz, 0, c, 0, sz * 1.1, sz * 0.82, sz * 1.1, headCol, emSel, MAT.FOLIAGE);
-          }
-        }
-      }
-
-      // Aspersion / irrigation animee
-      if (p.irrigationValveOpen) {
-        for (let k = -2; k <= 2; k++) {
-          const pulse = (this.elapsed * 2.5 + k * 0.2) % 1;
-          const lx = k * (w * 0.18);
-          const wx = p.x + cosR * lx;
-          const wz = p.z - sinR * lx;
-          drawMesh("sphere", wx, H(wx, wz) + 0.4 + pulse * 0.75, wz, 0, 0, 0, 0.14, 0.24, 0.14, [0.35, 0.84, 1.0, 0.82], 0.3, MAT.WATER, { castShadow: false });
-        }
-      }
-
-      const effW = Math.abs(cosR) * w + Math.abs(sinR) * d;
-      const effD = Math.abs(sinR) * w + Math.abs(cosR) * d;
-      this.hitBoxes.push({ kind: "plot", id: p.id, label: p.name, x: p.x, z: p.z, w: effW, d: effD, y0: baseY, y1: baseY + (p.zone === "Serre" ? 3.4 : 1.8), data: p });
-      addArPin(
-        p.id,
-        `${crop.icon} ${p.id} · ${snap?.moisturePct ?? p.moisturePct}% eau · ${snap?.progressPct ?? 55}%`,
-        p.x,
-        baseY + (p.zone === "Serre" ? 3.5 : 1.6),
-        p.z,
-        (snap?.moisturePct ?? p.moisturePct) < 38 || (snap?.diseaseRisk ?? p.diseaseRisk) > 45
-      );
-    };
-
-    opaquePlots.forEach((p) => drawPlotRealistic(p, snapMap.get(p.id)));
-    ghPlots.forEach((p) => drawPlotRealistic(p, snapMap.get(p.id)));
-
-    // --- 3. Rendu anatomique organique des 8 especes d'animaux ---
-    const drawAnimal3D = (speciesId, ax, az, yaw, animPhase, seed) => {
-      const ay = H(ax, az);
-      const legSwing = Math.sin(animPhase) * 0.26;
-      const localA = makeLocal(ax, ay, az, yaw);
-      const baseMat = mat4Transform(ax, ay, az, 0, yaw, 0, 1, 1, 1);
-
-      if (speciesId === "bovin_lait" || speciesId === "bovin_viande") {
-        const isDairy = speciesId === "bovin_lait";
-        const bodyCol = isDairy ? [0.95, 0.94, 0.91, 1] : [0.76, 0.54, 0.34, 1];
-        // Torse arrondi + croupe + cou + tete + museau + cornes + oreilles + queue
-        localA("sphere", 0, 0.42, 0, 0, 0, 0, 0.78, 0.68, 1.46, bodyCol, 0, MAT.FUR);
-        if (isDairy) {
-          localA("sphere", 0.08, 0.68, -0.18, 0, 0, 0, 0.66, 0.42, 0.58, [0.13, 0.14, 0.16, 1], 0, MAT.FUR);
-          localA("sphere", -0.1, 0.6, 0.36, 0, 0, 0, 0.58, 0.38, 0.46, [0.13, 0.14, 0.16, 1], 0, MAT.FUR);
-          localA("sphere", 0, 0.36, -0.22, 0, 0, 0, 0.32, 0.18, 0.3, [0.94, 0.76, 0.76, 1]);
-        }
-        // Cou + tete
-        localA("cyl", 0, 0.64, 0.58, 0.55, 0, 0, 0.38, 0.45, 0.4, isDairy ? [0.16, 0.16, 0.18, 1] : bodyCol, 0, MAT.FUR);
-        localA("sphere", 0, 0.72, 0.86, 0.18, 0, 0, 0.44, 0.42, 0.48, isDairy ? [0.16, 0.16, 0.18, 1] : bodyCol, 0, MAT.FUR);
-        localA("sphere", 0, 0.70, 1.09, 0, 0, 0, 0.32, 0.22, 0.18, [0.94, 0.72, 0.72, 1]);
-        localA("cone", -0.18, 1.06, 0.84, 0, 0, 0.48, 0.09, 0.22, 0.09, [0.92, 0.88, 0.76, 1]);
-        localA("cone", 0.18, 1.06, 0.84, 0, 0, -0.48, 0.09, 0.22, 0.09, [0.92, 0.88, 0.76, 1]);
-        localA("cyl", 0, 0.22, -0.82, 0.24, 0, 0, 0.06, 0.45, 0.06, bodyCol, 0, MAT.FUR);
-        // 4 pattes articulees a la hanche
-        for (const [lx, lz, s] of [[-0.22, 0.45, 1], [0.22, 0.45, -1], [-0.22, -0.45, -1], [0.22, -0.45, 1]]) {
-          drawPivotBox(baseMat, lx, 0.48, lz, legSwing * s, 0.14, 0.48, 0.14, bodyCol);
-        }
-      } else if (speciesId === "ovin") {
-        // Mouton laineux multi-spheres
-        const wool = [0.96, 0.94, 0.87, 1];
-        localA("sphere", 0, 0.26, 0, 0, 0, 0, 0.62, 0.54, 0.9, wool, 0, MAT.FUR);
-        localA("sphere", 0.1, 0.34, 0.15, 0, 0, 0, 0.44, 0.42, 0.5, wool, 0, MAT.FUR);
-        localA("sphere", -0.1, 0.32, -0.15, 0, 0, 0, 0.44, 0.42, 0.5, wool, 0, MAT.FUR);
-        localA("sphere", 0, 0.42, 0.52, 0.2, 0, 0, 0.28, 0.26, 0.34, [0.2, 0.19, 0.18, 1], 0, MAT.FUR);
-        localA("box", -0.17, 0.52, 0.46, 0, 0, 0.4, 0.14, 0.06, 0.08, [0.2, 0.19, 0.18, 1]);
-        localA("box", 0.17, 0.52, 0.46, 0, 0, -0.4, 0.14, 0.06, 0.08, [0.2, 0.19, 0.18, 1]);
-        for (const [lx, lz, s] of [[-0.17, 0.28, 1], [0.17, 0.28, -1], [-0.17, -0.28, -1], [0.17, -0.28, 1]]) {
-          drawPivotBox(baseMat, lx, 0.32, lz, legSwing * s * 0.7, 0.09, 0.32, 0.09, [0.2, 0.19, 0.18, 1]);
-        }
-      } else if (speciesId === "caprin") {
-        // Chevre alpine chamoisee
-        const coat = [0.64, 0.44, 0.26, 1];
-        localA("sphere", 0, 0.32, 0, 0, 0, 0, 0.44, 0.46, 0.86, coat, 0, MAT.FUR);
-        localA("cyl", 0, 0.48, 0.36, 0.38, 0, 0, 0.22, 0.36, 0.22, coat, 0, MAT.FUR);
-        localA("sphere", 0, 0.62, 0.54, 0, 0, 0, 0.24, 0.28, 0.32, [0.46, 0.31, 0.18, 1], 0, MAT.FUR);
-        localA("cone", -0.09, 0.86, 0.48, -0.45, 0, 0.15, 0.06, 0.24, 0.06, [0.24, 0.21, 0.19, 1]);
-        localA("cone", 0.09, 0.86, 0.48, -0.45, 0, -0.15, 0.06, 0.24, 0.06, [0.24, 0.21, 0.19, 1]);
-        for (const [lx, lz, s] of [[-0.14, 0.28, 1], [0.14, 0.28, -1], [-0.14, -0.28, -1], [0.14, -0.28, 1]]) {
-          drawPivotBox(baseMat, lx, 0.36, lz, legSwing * s * 0.8, 0.08, 0.36, 0.08, [0.32, 0.24, 0.18, 1]);
-        }
-      } else if (speciesId === "porcin") {
-        // Cochon rose/gascon + groin + 4 pattes
-        const pigCol = seed % 2 === 0 ? [0.95, 0.68, 0.68, 1] : [0.35, 0.31, 0.29, 1];
-        localA("sphere", 0, 0.2, 0, 0, 0, 0, 0.56, 0.48, 0.92, pigCol, 0, MAT.FUR);
-        localA("sphere", 0, 0.26, 0.48, 0, 0, 0, 0.38, 0.34, 0.34, pigCol, 0, MAT.FUR);
-        localA("cyl", 0, 0.32, 0.66, Math.PI / 2, 0, 0, 0.18, 0.08, 0.16, [0.96, 0.58, 0.6, 1]);
-        localA("box", -0.14, 0.5, 0.45, 0.45, 0, 0.3, 0.12, 0.04, 0.14, pigCol, 0, MAT.FUR);
-        localA("box", 0.14, 0.5, 0.45, 0.45, 0, -0.3, 0.12, 0.04, 0.14, pigCol, 0, MAT.FUR);
-        for (const [lx, lz, s] of [[-0.16, 0.26, 1], [0.16, 0.26, -1], [-0.16, -0.26, -1], [0.16, -0.26, 1]]) {
-          drawPivotBox(baseMat, lx, 0.24, lz, legSwing * s * 0.7, 0.09, 0.24, 0.09, pigCol);
-        }
-      } else if (speciesId === "equin") {
-        // Cheval alezan / bai + criniere + queue
-        const horseCol = [0.48, 0.28, 0.16, 1];
-        localA("sphere", 0, 0.6, 0, 0, 0, 0, 0.68, 0.62, 1.48, horseCol, 0, MAT.FUR);
-        localA("cyl", 0, 0.92, 0.62, 0.48, 0, 0, 0.3, 0.66, 0.34, horseCol, 0, MAT.FUR);
-        localA("sphere", 0, 1.24, 0.92, 0.4, 0, 0, 0.28, 0.3, 0.48, horseCol, 0, MAT.FUR);
-        localA("box", 0, 1.05, 0.58, 0.48, 0, 0, 0.08, 0.62, 0.14, [0.14, 0.1, 0.08, 1], 0, MAT.FUR);
-        localA("cyl", 0, 0.28, -0.92, 0.25, 0, 0, 0.12, 0.58, 0.12, [0.14, 0.1, 0.08, 1], 0, MAT.FUR);
-        for (const [lx, lz, s] of [[-0.2, 0.5, 1], [0.2, 0.5, -1], [-0.2, -0.5, -1], [0.2, -0.5, 1]]) {
-          drawPivotBox(baseMat, lx, 0.68, lz, legSwing * s, 0.12, 0.68, 0.12, [0.36, 0.2, 0.11, 1]);
-        }
-      } else if (speciesId === "canard") {
-        // Canard coureur indien + bec orange
-        localA("sphere", 0, 0.12, 0, -0.25, 0, 0, 0.24, 0.42, 0.28, [0.9, 0.86, 0.74, 1], 0, MAT.FUR);
-        localA("cyl", 0, 0.44, 0.12, 0, 0, 0, 0.11, 0.22, 0.11, [0.15, 0.45, 0.32, 1], 0, MAT.FUR);
-        localA("sphere", 0, 0.58, 0.14, 0, 0, 0, 0.16, 0.16, 0.18, [0.15, 0.48, 0.34, 1], 0, MAT.FUR);
-        localA("box", 0, 0.62, 0.26, 0, 0, 0, 0.08, 0.05, 0.16, [0.98, 0.56, 0.1, 1]);
-        localA("cyl", -0.06, 0, 0, 0, 0, 0, 0.04, 0.14, 0.04, [0.96, 0.54, 0.1, 1]);
-        localA("cyl", 0.06, 0, 0, 0, 0, 0, 0.04, 0.14, 0.04, [0.96, 0.54, 0.1, 1]);
-      } else {
-        // Poule pondeuse variee (rousse / blanche / noire) + crete + bec
-        const peck = Math.max(0, Math.sin(animPhase * 2.3)) * 0.28;
-        const henCol = seed % 3 === 0 ? [0.84, 0.42, 0.18, 1] : seed % 3 === 1 ? [0.94, 0.91, 0.84, 1] : [0.24, 0.22, 0.24, 1];
-        localA("sphere", 0, 0.1, 0, peck, 0, 0, 0.28, 0.26, 0.38, henCol, 0, MAT.FUR);
-        localA("cone", 0, 0.24 + peck * 0.15, -0.18, -0.6, 0, 0, 0.18, 0.18, 0.18, henCol, 0, MAT.FUR);
-        localA("sphere", 0, 0.28 - peck * 0.22, 0.2, 0, 0, 0, 0.15, 0.17, 0.17, henCol, 0, MAT.FUR);
-        localA("box", 0, 0.42 - peck * 0.22, 0.2, 0, 0, 0, 0.05, 0.09, 0.12, [0.92, 0.12, 0.15, 1]);
-        localA("cone", 0, 0.34 - peck * 0.22, 0.29, Math.PI / 2, 0, 0, 0.05, 0.08, 0.05, [0.96, 0.72, 0.14, 1]);
-        localA("cyl", -0.06, 0, 0, 0, 0, 0, 0.03, 0.12, 0.03, [0.92, 0.68, 0.14, 1]);
-        localA("cyl", 0.06, 0, 0, 0, 0, 0, 0.03, 0.12, 0.03, [0.92, 0.68, 0.14, 1]);
-      }
-    };
-
-    // --- 4. Rendu des Batiments, Corps de Ferme, Haies, Chemins & Riviere ---
-    for (const s of state.structures) {
-      const isSel = this.selectedId === s.id;
-      const emSel = isSel ? 0.28 : 0;
-      const w = s.w || 3, d = s.d || 3, h = s.h || 2.5, rot = s.rot || 0;
-      const sy = H(s.x, s.z);
-      const localS = makeLocal(s.x, sy, s.z, rot);
-      const cosR = Math.cos(rot), sinR = Math.sin(rot);
-
-      const addPlinth = (pw, pd, color = [0.56, 0.53, 0.48, 1]) => {
-        localS("box", 0, -1.8, 0, 0, 0, 0, pw + 0.14, 1.92, pd + 0.14, color, 0, MAT.STONE);
-      };
-
-      const addWindows = (lz, yLevel, count, spacing, winW = 0.62, winH = 0.85, shutters = true) => {
-        for (let k = -(count - 1) / 2; k <= (count - 1) / 2; k += 1) {
-          const wx = k * spacing;
-          localS("box", wx, yLevel, lz, 0, 0, 0, winW, winH, 0.08, [0.96, 0.86, 0.56, 1], nightGlow, MAT.GLASS);
-          localS("box", wx, yLevel - 0.04, lz + 0.04, 0, 0, 0, winW + 0.12, 0.08, 0.12, [0.76, 0.72, 0.66, 1], 0, MAT.STONE);
-          if (shutters) {
-            localS("box", wx - winW * 0.68, yLevel, lz + 0.02, 0, 0, 0, winW * 0.34, winH, 0.05, [0.36, 0.52, 0.44, 1], 0, MAT.WOOD);
-            localS("box", wx + winW * 0.68, yLevel, lz + 0.02, 0, 0, 0, winW * 0.34, winH, 0.05, [0.36, 0.52, 0.44, 1], 0, MAT.WOOD);
-          }
-        }
-      };
-
-      if (s.type === "farmhouse_courtyard") {
-        addPlinth(w, d);
-        // Cour gravillonnee + puits central en pierre
-        localS("box", 0, 0.04, 0.3, 0, 0, 0, w * 0.94, 0.14, d * 0.88, [0.78, 0.72, 0.6, 1], 0, MAT.GRAVEL, { castShadow: false });
-        localS("cyl", 0, 0.12, d * 0.14, 0, 0, 0, 1.15, 0.58, 1.15, [0.68, 0.63, 0.56, 1], 0, MAT.STONE);
-        localS("cyl", 0, 0.64, d * 0.14, 0, 0, 0, 0.9, 0.08, 0.9, [0.1, 0.46, 0.74, 1], 0, MAT.WATER, { castShadow: false });
-
-        // Corps principal Nord
-        const mainH = h * 0.68;
-        localS("box", 0, 0.1, -d * 0.26, 0, 0, 0, w, mainH, d * 0.42, [0.84, 0.78, 0.68, 1], emSel, MAT.STONE);
-        localS("roof", 0, 0.1 + mainH, -d * 0.26, 0, 0, 0, w + 0.5, h * 0.42, d * 0.48, [0.72, 0.3, 0.18, 1], emSel, MAT.TILE);
-        localS("box", 0, 0.1 + mainH + h * 0.4, -d * 0.26, 0, 0, 0, w + 0.52, 0.1, 0.16, [0.62, 0.24, 0.14, 1], 0, MAT.TILE);
-
-        // Cheminee en pierre + fumee animee
-        localS("box", -w * 0.28, h * 0.66, -d * 0.26, 0, 0, 0, 0.68, h * 0.52, 0.68, [0.68, 0.6, 0.52, 1], 0, MAT.STONE);
-        for (let sm = 0; sm < 3; sm++) {
-          const pCycle = (this.elapsed * 0.35 + sm * 0.33) % 1;
-          const smokeSz = 0.28 + pCycle * 0.55;
-          localS("sphere", -w * 0.28 + Math.sin(this.elapsed + sm) * 0.18, h * 1.18 + pCycle * 1.9, -d * 0.26, 0, 0, 0, smokeSz, smokeSz * 0.8, smokeSz, [0.86, 0.88, 0.9, (1 - pCycle) * 0.36], 0, MAT.DEFAULT, { castShadow: false });
-        }
-
-        // Ailes Est et Ouest + toitures canal
-        for (const side of [-1, 1]) {
-          const ax = side * w * 0.36;
-          const wingH = h * 0.54;
-          localS("box", ax, 0.1, d * 0.15, 0, 0, 0, w * 0.26, wingH, d * 0.56, [0.82, 0.75, 0.65, 1], emSel, MAT.STONE);
-          localS("roof", ax, 0.1 + wingH, d * 0.15, 0, Math.PI / 2, 0, d * 0.6, h * 0.32, w * 0.31, [0.72, 0.3, 0.18, 1], emSel, MAT.TILE);
-        }
-
-        // Fenetres facade + porte cochere bois + lanternes nocturnes
-        addWindows(-d * 0.045, 0.85, 4, 2.55, 0.6, 0.82, true);
-        addWindows(-d * 0.045, 2.05, 5, 1.65, 0.58, 0.78, true);
-        localS("box", 0, 0.1, -d * 0.045, 0, 0, 0, 1.5, 2.1, 0.1, [0.42, 0.26, 0.14, 1], 0, MAT.WOOD);
-        if (!sun.isDay) {
-          localS("sphere", -1.1, 2.2, -d * 0.03, 0, 0, 0, 0.2, 0.22, 0.2, [1.0, 0.82, 0.42, 1], 0.95);
-          localS("sphere", 1.1, 2.2, -d * 0.03, 0, 0, 0, 0.2, 0.22, 0.2, [1.0, 0.82, 0.42, 1], 0.95);
-        }
-      } else if (s.type === "farm_house" || s.type === "stone_barn") {
-        addPlinth(w, d);
-        const wallCol = s.type === "stone_barn" ? [0.74, 0.67, 0.58, 1] : [0.87, 0.81, 0.71, 1];
-        localS("box", 0, 0.05, 0, 0, 0, 0, w, h * 0.68, d, wallCol, emSel, MAT.STONE);
-        localS("roof", 0, 0.05 + h * 0.68, 0, 0, 0, 0, w + 0.45, h * 0.42, d + 0.45, [0.7, 0.29, 0.18, 1], emSel, MAT.TILE);
-        // Grande porte grange avec traverses bois
-        localS("box", 0, 0.05, d * 0.505, 0, 0, 0, w * 0.34, h * 0.52, 0.1, [0.44, 0.27, 0.14, 1], 0, MAT.WOOD);
-        localS("box", 0, 0.05 + h * 0.25, d * 0.52, 0, 0, 0, w * 0.35, 0.09, 0.08, [0.3, 0.18, 0.09, 1], 0, MAT.WOOD);
-        addWindows(d * 0.505, h * 0.42, 2, w * 0.66, 0.56, 0.72, s.type === "farm_house");
-        if (s.type === "stone_barn") {
-          // Bottes de foin dorees a cote de la grange
-          localS("cyl", w * 0.58, 0.55, d * 0.2 - 0.5, Math.PI / 2, 0.3, 0, 1.1, 1.0, 1.1, [0.88, 0.72, 0.26, 1], 0, MAT.FOLIAGE);
-          localS("cyl", w * 0.62, 0.55, -d * 0.2 - 0.5, Math.PI / 2, -0.2, 0, 1.1, 1.0, 1.1, [0.86, 0.7, 0.24, 1], 0, MAT.FOLIAGE);
-        }
-      } else if (s.type === "farm_shop") {
-        addPlinth(w, d);
-        localS("box", 0, 0.05, 0, 0, 0, 0, w, h * 0.72, d, [0.92, 0.85, 0.72, 1], emSel, MAT.STONE);
-        localS("roof", 0, 0.05 + h * 0.72, 0, 0, 0, 0, w + 0.4, h * 0.35, d + 0.4, [0.76, 0.28, 0.18, 1], emSel, MAT.TILE);
-        // Auvent raye rouge/creme + poteaux bois + etals garnis
-        for (let i = -2; i <= 2; i++) {
-          const stripCol = Math.abs(i) % 2 === 0 ? [0.88, 0.2, 0.2, 1] : [0.96, 0.93, 0.86, 1];
-          localS("box", i * (w * 0.18), 1.85, d * 0.66, 0.28, 0, 0, w * 0.185, 0.1, 1.35, stripCol, 0.05);
-        }
-        localS("cyl", -w * 0.42, 0, d * 0.8, 0, 0, 0, 0.1, 1.65, 0.1, [0.46, 0.3, 0.16, 1], 0, MAT.WOOD);
-        localS("cyl", w * 0.42, 0, d * 0.8, 0, 0, 0, 0.1, 1.65, 0.1, [0.46, 0.3, 0.16, 1], 0, MAT.WOOD);
-        localS("box", -0.95, 0.04, d * 0.65, 0, 0, 0, 1.35, 0.68, 0.72, [0.54, 0.36, 0.2, 1], 0, MAT.WOOD);
-        localS("box", 0.95, 0.04, d * 0.65, 0, 0, 0, 1.35, 0.68, 0.72, [0.54, 0.36, 0.2, 1], 0, MAT.WOOD);
-        localS("sphere", -1.1, 0.68, d * 0.65, 0, 0, 0, 0.45, 0.28, 0.45, [0.92, 0.22, 0.16, 1]);
-        localS("sphere", -0.65, 0.68, d * 0.65, 0, 0, 0, 0.45, 0.28, 0.45, [0.22, 0.78, 0.28, 1]);
-        localS("sphere", 0.75, 0.68, d * 0.65, 0, 0, 0, 0.45, 0.28, 0.45, [0.96, 0.52, 0.14, 1]);
-        localS("sphere", 1.15, 0.68, d * 0.65, 0, 0, 0, 0.45, 0.28, 0.45, [0.96, 0.82, 0.16, 1]);
-      } else if (s.type === "grain_silo") {
-        addPlinth(w, d, [0.58, 0.6, 0.62, 1]);
-        localS("cyl", 0, 0.08, 0, 0, 0, 0, w, h * 0.78, d, [0.76, 0.81, 0.86, 1], emSel, MAT.METAL);
-        for (let b = 1; b <= 3; b++) {
-          localS("cyl", 0, 0.08 + b * h * 0.19, 0, 0, 0, 0, w * 1.03, 0.1, d * 1.03, [0.56, 0.61, 0.66, 1], 0, MAT.METAL);
-        }
-        localS("cone", 0, 0.08 + h * 0.78, 0, 0, 0, 0, w * 1.06, h * 0.24, d * 1.06, [0.64, 0.7, 0.76, 1], emSel, MAT.METAL);
-        localS("cyl", 0, 0.08 + h * 1.0, 0, 0, 0, 0, w * 0.22, 0.38, d * 0.22, [0.5, 0.56, 0.62, 1], 0, MAT.METAL);
-        // Echelle laterale & vis de remplissage
-        localS("box", w * 0.52, 0.2, 0, 0, 0, 0, 0.12, h * 0.75, 0.45, [0.42, 0.46, 0.5, 1], 0, MAT.METAL);
-        localS("cyl", -w * 0.5, 0.3, 0, 0, 0, 0.48, 0.22, h * 0.85, 0.22, [0.62, 0.66, 0.72, 1], 0, MAT.METAL);
-      } else if (s.type === "hangar" || s.type === "barn_livestock") {
-        addPlinth(w, d);
-        const isHangar = s.type === "hangar";
-        const wallCol = isHangar ? (s.lightRoof ? [0.58, 0.62, 0.66, 1] : [0.46, 0.52, 0.58, 1]) : [0.68, 0.54, 0.38, 1];
-        const roofCol = isHangar ? (s.lightRoof ? [0.69, 0.72, 0.74, 1] : [0.36, 0.42, 0.48, 1]) : [0.66, 0.28, 0.18, 1];
-        const matWall = isHangar ? MAT.METAL : MAT.WOOD;
-        localS("box", 0, 0.06, 0, 0, 0, 0, w, h * 0.68, d, wallCol, emSel, matWall);
-        localS("roof", 0, 0.06 + h * 0.68, 0, 0, 0, 0, w + 0.4, h * 0.42, d + 0.4, roofCol, emSel, isHangar ? MAT.METAL : MAT.TILE);
-        // Poteaux et grande baie d'entree
-        for (const px of [-w * 0.46, 0, w * 0.46]) {
-          localS("box", px, 0.06, d * 0.51, 0, 0, 0, 0.24, h * 0.68, 0.24, [0.34, 0.24, 0.14, 1], 0, MAT.WOOD);
-        }
-        localS("box", 0, 0.06, d * 0.505, 0, 0, 0, w * 0.46, h * 0.56, 0.08, [0.16, 0.18, 0.2, 1], 0, MAT.DEFAULT);
-        if (!isHangar) {
-          // Ratelier foin exterieur
-          localS("box", 0, 0.12, d * 0.62, 0, 0, 0, w * 0.72, 0.55, 0.55, [0.54, 0.36, 0.18, 1], 0, MAT.WOOD);
-          localS("box", 0, 0.45, d * 0.62, 0, 0, 0, w * 0.65, 0.32, 0.44, [0.88, 0.74, 0.28, 1], 0, MAT.FOLIAGE);
-        }
-      } else if (s.type === "locker_kiosk") {
-        // Kiosque casiers fermiers 24h/24 (D532) : auvent vert, casiers alu et ecran tactile lumineux
-        addPlinth(w, d, [0.52, 0.55, 0.58, 1]);
-        localS("box", 0, 0.06, -0.08, 0, 0, 0, w, h * 0.74, d * 0.76, [0.24, 0.28, 0.34, 1], emSel, MAT.METAL);
-        localS("box", 0, 0.06 + h * 0.74, 0.12, 0.08, 0, 0, w + 0.35, 0.14, d + 0.45, [0.14, 0.58, 0.28, 1], 0.12, MAT.METAL);
-        localS("box", 0, 0.06 + h * 0.84, d * 0.38, 0, 0, 0, w * 0.86, 0.28, 0.08, [0.18, 0.78, 0.36, 1], 0.28, MAT.DEFAULT);
-        for (let c = -1; c <= 1; c++) {
-          for (let r = 0; r < 3; r++) {
-            const lx = c * (w * 0.22) - w * 0.08;
-            const ly = 0.22 + r * (h * 0.21);
-            localS("box", lx, ly, d * 0.365, 0, 0, 0, w * 0.19, h * 0.17, 0.08, [0.88, 0.91, 0.94, 1], 0.04, MAT.METAL);
-          }
-        }
-        // Borne ecran tactile 24/7
-        localS("box", w * 0.34, 0.78, d * 0.37, 0, 0, 0, 0.48, 0.62, 0.09, [0.22, 0.88, 0.96, 1], 0.68, MAT.GLASS);
-      } else if (s.type === "conserverie_coldroom") {
-        // Chambre froide 17m2 panneaux isothermes blancs + condenseur + atelier conserverie inox
-        addPlinth(w, d, [0.56, 0.58, 0.6, 1]);
-        localS("box", 0, 0.06, 0, 0, 0, 0, w, h * 0.72, d, [0.92, 0.94, 0.96, 1], emSel, MAT.METAL);
-        localS("roof", 0, 0.06 + h * 0.72, 0, 0, 0, 0, w + 0.24, h * 0.28, d + 0.24, [0.46, 0.52, 0.58, 1], emSel, MAT.METAL);
-        // Porte isotherme + joint bleu
-        localS("box", -w * 0.16, 0.08, d * 0.505, 0, 0, 0, 1.35, h * 0.58, 0.08, [0.76, 0.82, 0.88, 1], 0, MAT.METAL);
-        localS("box", w * 0.22, 0.88, d * 0.505, 0, 0, 0, 1.0, 0.65, 0.07, [0.78, 0.9, 0.98, 1], nightGlow, MAT.GLASS);
-        // Groupe froid en toiture + cheminee vapeur autoclave
-        localS("box", -w * 0.28, 0.06 + h * 0.88, -d * 0.15, 0, 0, 0, 1.05, 0.62, 0.78, [0.64, 0.68, 0.72, 1], 0, MAT.METAL);
-        localS("cyl", w * 0.32, 0.06 + h * 0.85, 0.1, 0, 0, 0, 0.26, 0.95, 0.26, [0.78, 0.82, 0.86, 1], 0, MAT.METAL);
-      } else if (s.type === "tarp_pad") {
-        // Bache blanche de solarisation / pepiniere + lests perimetriques
-        localS("box", 0, 0.02, 0, 0, 0, 0, w, 0.08, d, [0.92, 0.93, 0.94, 1], emSel, MAT.DEFAULT, { castShadow: false });
-        for (const [bx, bz] of [[-w * 0.44, -d * 0.42], [w * 0.44, -d * 0.42], [-w * 0.44, d * 0.42], [w * 0.44, d * 0.42], [-w * 0.44, 0], [w * 0.44, 0]]) {
-          localS("box", bx, 0.08, bz, 0, 0, 0, 0.36, 0.12, 0.52, [0.22, 0.24, 0.27, 1], 0, MAT.DEFAULT);
-        }
-      } else if (s.type === "coop_mobile" || s.type === "coop_fixed") {
-        const lift = s.type === "coop_mobile" ? 0.32 : 0.06;
-        if (s.type === "coop_fixed") addPlinth(w, d);
-        localS("box", 0, lift, 0, 0, 0, 0, w, h * 0.65, d, [0.82, 0.54, 0.24, 1], emSel, MAT.WOOD);
-        localS("roof", 0, lift + h * 0.65, 0, 0, 0, 0, w + 0.3, h * 0.42, d + 0.3, [0.72, 0.26, 0.16, 1], emSel, MAT.TILE);
-        // Pondoir lateral + trappe auto + rampe acces
-        localS("box", -w * 0.56, lift + 0.2, 0, 0, 0, 0, 0.5, 0.55, d * 0.6, [0.74, 0.48, 0.2, 1], 0, MAT.WOOD);
-        localS("box", 0, lift + 0.08, d * 0.51, 0, 0, 0, 0.75, 0.62, 0.1, s.doorOpen ? [0.18, 0.84, 0.38, 1] : [0.88, 0.2, 0.2, 1], 0.25);
-        if (s.doorOpen) {
-          localS("box", 0, lift * 0.5, d * 0.68, -0.45, 0, 0, 0.65, 0.06, 0.9, [0.58, 0.4, 0.22, 1], 0, MAT.WOOD);
-        }
-        if (s.type === "coop_mobile") {
-          for (const [wx, wz] of [[-w * 0.36, d * 0.48], [w * 0.36, d * 0.48], [-w * 0.36, -d * 0.48], [w * 0.36, -d * 0.48]]) {
-            localS("cyl", wx + 0.07, 0.22, wz, 0, 0, Math.PI / 2, 0.44, 0.14, 0.44, [0.18, 0.19, 0.2, 1]);
-          }
-        }
-      } else if (s.type === "paddock") {
-        // Prairie cloturee par poteaux bois suivant le denivele + abreuvoir + ratelier
-        drawMesh("box", s.x, sy + 0.01, s.z, 0, rot, 0, w, 0.06, d, [0.28, 0.62, 0.24, 1], emSel, MAT.TERRAIN, { castShadow: false });
-        const placeFenceSide = (len, fixedCoord, isZ) => {
-          const steps = Math.max(2, Math.round(len / 2.2));
-          for (let i = 0; i <= steps; i++) {
-            const p = (i / steps - 0.5) * len;
-            const lx = isZ ? p : fixedCoord;
-            const lz = isZ ? fixedCoord : p;
-            const wx = s.x + cosR * lx + sinR * lz;
-            const wz = s.z - sinR * lx + cosR * lz;
-            drawMesh("cyl", wx, H(wx, wz), wz, 0, rot, 0, 0.13, 0.95, 0.13, [0.46, 0.31, 0.18, 1], 0, MAT.WOOD);
-          }
-          const rx = isZ ? 0 : fixedCoord;
-          const rz = isZ ? fixedCoord : 0;
-          const mx = s.x + cosR * rx + sinR * rz;
-          const mz = s.z - sinR * rx + cosR * rz;
-          const my = H(mx, mz);
-          drawMesh("box", mx, my + 0.42, mz, 0, rot, 0, isZ ? len : 0.08, 0.08, isZ ? 0.08 : len, [0.54, 0.38, 0.22, 1], 0, MAT.WOOD);
-          drawMesh("box", mx, my + 0.76, mz, 0, rot, 0, isZ ? len : 0.08, 0.08, isZ ? 0.08 : len, [0.54, 0.38, 0.22, 1], 0, MAT.WOOD);
-        };
-        placeFenceSide(w, d * 0.49, true);
-        placeFenceSide(w, -d * 0.49, true);
-        placeFenceSide(d, w * 0.49, false);
-        placeFenceSide(d, -w * 0.49, false);
-
-        // Abreuvoir & boule de foin
-        const tx = s.x - cosR * (w * 0.26);
-        const tz = s.z + sinR * (w * 0.26);
-        drawMesh("box", tx, H(tx, tz), tz, 0, rot, 0, 1.5, 0.38, 0.65, [0.55, 0.6, 0.65, 1], 0, MAT.METAL);
-        drawMesh("box", tx, H(tx, tz) + 0.35, tz, 0, rot, 0, 1.36, 0.06, 0.52, [0.1, 0.54, 0.85, 1], 0, MAT.WATER, { castShadow: false });
-        const fx = s.x + cosR * (w * 0.28);
-        const fz = s.z - sinR * (w * 0.28);
-        drawMesh("cyl", fx, H(fx, fz), fz, 0, 0, 0, 1.25, 0.9, 1.25, [0.88, 0.72, 0.26, 1], 0, MAT.FOLIAGE);
-      } else if (s.type === "hedge_row") {
-        // Haie bocagere orientee selon la grande dimension (w vs d)
-        const alongX = w >= d;
-        const spanLen = alongX ? w : d;
-        const thick = alongX ? d : w;
-        const count = Math.max(3, Math.round(spanLen / 1.55));
-        for (let k = 0; k < count; k++) {
-          const tPos = (count === 1 ? 0 : (k / (count - 1) - 0.5)) * (spanLen - thick * 0.5);
-          const lx = alongX ? tPos : Math.sin(k * 2.1) * 0.14;
-          const lz = alongX ? Math.sin(k * 2.1) * 0.14 : tPos;
-          const bx = s.x + cosR * lx + sinR * lz;
-          const bz = s.z - sinR * lx + cosR * lz;
-          const by = H(bx, bz);
-          const hScale = h * (0.78 + ((k * 37) % 5) * 0.08);
-          const bRad = thick * (1.28 + (k % 2) * 0.22);
-          const shade = 0.14 + (k % 3) * 0.025;
-          drawMesh("sphere", bx, by - 0.1, bz, 0, k, 0, bRad, hScale * 0.88, bRad, [shade, 0.44 + (k % 3) * 0.04, 0.17, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.6 });
-          drawMesh("leafCluster", bx, by + hScale * 0.25, bz, 0, k * 1.1, 0, bRad * 1.15, hScale * 0.7, bRad * 1.15, [shade + 0.03, 0.52, 0.19, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind * 0.85 });
-          if (k % 4 === 1) {
-            // Arbuste / jeune arbre bocager dans la haie
-            drawMesh("cyl", bx, by, bz, 0, 0, 0, 0.24, h * 0.9, 0.24, [0.4, 0.26, 0.14, 1], 0, MAT.WOOD);
-            drawMesh("sphere", bx, by + h * 0.68, bz, 0, 0, 0, bRad * 1.25, h * 0.72, bRad * 1.25, [0.16, 0.5, 0.2, 1], emSel, MAT.FOLIAGE, { windAmt: foliageWind });
-          }
-        }
-      } else if (s.type === "hedge_tree") {
-        // Arbre fruitier / noyer organique multi-houppiers + fruits
-        drawMesh("cyl", s.x, sy - 0.2, s.z, 0, 0, 0, 0.42, 1.8, 0.42, [0.42, 0.26, 0.15, 1], 0, MAT.WOOD);
-        drawMesh("cyl", s.x - 0.22, sy + 1.2, s.z + 0.1, 0.35, 0, 0.45, 0.18, 1.1, 0.18, [0.42, 0.26, 0.15, 1], 0, MAT.WOOD);
-        drawMesh("cyl", s.x + 0.24, sy + 1.25, s.z - 0.15, -0.3, 0, -0.42, 0.18, 1.1, 0.18, [0.42, 0.26, 0.15, 1], 0, MAT.WOOD);
-        const puffs = [
-          [0, 1.75, 0, 2.5, 2.0, 2.5, [0.16, 0.5, 0.2, 1]],
-          [-0.8, 1.55, 0.45, 1.85, 1.55, 1.85, [0.19, 0.56, 0.22, 1]],
-          [0.82, 1.6, -0.35, 1.85, 1.6, 1.85, [0.15, 0.47, 0.18, 1]],
-          [0.15, 2.65, 0.25, 1.75, 1.45, 1.75, [0.22, 0.6, 0.24, 1]],
-          [-0.35, 2.2, -0.65, 1.6, 1.4, 1.6, [0.18, 0.54, 0.21, 1]],
-        ];
-        for (const [px, py, pz, sx, syC, sz, col] of puffs) {
-          drawMesh("sphere", s.x + px, sy + py, s.z + pz, 0, 0, 0, sx, syC, sz, col, emSel, MAT.FOLIAGE, { windAmt: foliageWind });
-        }
-        drawMesh("leafCluster", s.x, sy + 1.8, s.z, 0, 0.4, 0, 2.7, 2.2, 2.7, [0.2, 0.58, 0.22, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
-        // Pommes sur pommier
-        if ((s.label || "").toLowerCase().includes("pomm")) {
-          for (const [fx, fy, fz] of [[-0.75, 2.1, 0.9], [0.7, 2.25, 0.65], [-0.2, 2.6, -0.8], [0.4, 1.9, -0.75]]) {
-            drawMesh("sphere", s.x + fx, sy + fy, s.z + fz, 0, 0, 0, 0.16, 0.16, 0.16, [0.92, 0.18, 0.16, 1], 0.05);
-          }
-        }
-      } else if (s.type === "path_dirt" || s.type === "road_paved") {
-        // Chemins segmentes suivant la pente du terrain
-        const isRoad = s.type === "road_paved";
-        const pathCol = isRoad ? [0.58, 0.59, 0.6, 1] : [0.74, 0.62, 0.43, 1];
-        const alongX = w >= d;
-        const totalLen = alongX ? w : d;
-        const segs = Math.max(2, Math.ceil(totalLen / 3.2));
-        const segLen = totalLen / segs + 0.12;
-        for (let i = 0; i < segs; i++) {
-          const offset = ((i + 0.5) / segs - 0.5) * totalLen;
-          const lx = alongX ? offset : 0;
-          const lz = alongX ? 0 : offset;
-          const wx = s.x + cosR * lx + sinR * lz;
-          const wz = s.z - sinR * lx + cosR * lz;
-          const wy = H(wx, wz);
-          drawMesh("box", wx, wy - 0.03, wz, 0, rot, 0, alongX ? segLen : w, 0.1, alongX ? d : segLen, pathCol, emSel, MAT.GRAVEL, { castShadow: false });
-          if (isRoad) {
-            const kerbX = alongX ? 0 : w * 0.52;
-            const kerbZ = alongX ? d * 0.52 : 0;
-            drawMesh("box", wx + cosR * kerbX + sinR * kerbZ, wy - 0.01, wz - sinR * kerbX + cosR * kerbZ, 0, rot, 0, alongX ? segLen : 0.16, 0.14, alongX ? 0.16 : segLen, [0.46, 0.44, 0.4, 1], 0, MAT.STONE, { castShadow: false });
-            drawMesh("box", wx - cosR * kerbX - sinR * kerbZ, wy - 0.01, wz + sinR * kerbX - cosR * kerbZ, 0, rot, 0, alongX ? segLen : 0.16, 0.14, alongX ? 0.16 : segLen, [0.46, 0.44, 0.4, 1], 0, MAT.STONE, { castShadow: false });
-          }
-        }
-      } else if (s.type === "stone_wall") {
-        const segs = Math.max(2, Math.round(w / 1.8));
-        for (let i = 0; i < segs; i++) {
-          const lx = ((i + 0.5) / segs - 0.5) * w;
-          const wx = s.x + cosR * lx;
-          const wz = s.z - sinR * lx;
-          const wy = H(wx, wz);
-          drawMesh("box", wx, wy - 0.2, wz, 0, rot, 0, w / segs + 0.08, h + 0.2, d, [0.65, 0.61, 0.55, 1], emSel, MAT.STONE);
-          drawMesh("box", wx, wy + h - 0.02, wz, 0, rot, 0, w / segs + 0.1, 0.12, d + 0.12, [0.56, 0.52, 0.47, 1], 0, MAT.STONE);
-        }
-      } else if (s.type === "river_seg") {
-        // Galets et roseaux de berge (eau rendue par ruban continu meshes.river)
-        const bridges = (state.structures || []).filter((b) => b.type === "bridge");
-        for (let k = -2; k <= 2; k++) {
-          const bx = s.x + cosR * (k * w * 0.21);
-          const bz = s.z - sinR * (k * w * 0.21) + (k % 2 === 0 ? d * 0.6 : -d * 0.6);
-          if (bridges.some((b) => Math.hypot(bx - b.x, bz - b.z) < 2.9)) continue;
-          const by = H(bx, bz);
-          drawMesh("sphere", bx, by - 0.08, bz, 0, k, 0, 0.52, 0.3, 0.45, [0.56, 0.53, 0.48, 1], 0, MAT.STONE);
-          if (k % 2 === 0) {
-            drawMesh("leafCluster", bx + 0.35, by - 0.04, bz, 0, k, 0, 0.45, 0.78, 0.45, [0.22, 0.56, 0.24, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
-          }
-        }
-      } else if (s.type === "bridge") {
-        // Pont en pierre : culées sur berges + tablier ouvert laissant couler l'eau dessous
-        localS("box", 0, -0.35, -d * 0.42, 0, 0, 0, w, 0.78, d * 0.22, [0.62, 0.57, 0.5, 1], emSel, MAT.STONE);
-        localS("box", 0, -0.35, d * 0.42, 0, 0, 0, w, 0.78, d * 0.22, [0.62, 0.57, 0.5, 1], emSel, MAT.STONE);
-        localS("box", 0, 0.24, -d * 0.53, 0, 0, 0, w * 0.96, 0.22, d * 0.14, [0.68, 0.63, 0.54, 1], emSel, MAT.GRAVEL);
-        localS("box", 0, 0.24, d * 0.53, 0, 0, 0, w * 0.96, 0.22, d * 0.14, [0.68, 0.63, 0.54, 1], emSel, MAT.GRAVEL);
-        localS("box", 0, 0.38, 0, 0, 0, 0, w * 0.98, 0.22, d + 0.16, [0.7, 0.64, 0.55, 1], emSel, MAT.GRAVEL);
-        localS("box", -w * 0.44, 0.58, 0, 0, 0, 0, 0.24, 0.56, d + 0.06, [0.58, 0.53, 0.47, 1], emSel, MAT.STONE);
-        localS("box", w * 0.44, 0.58, 0, 0, 0, 0, 0.24, 0.56, d + 0.06, [0.58, 0.53, 0.47, 1], emSel, MAT.STONE);
-        localS("box", -w * 0.44, 1.14, 0, 0, 0, 0, 0.28, 0.1, d + 0.12, [0.46, 0.31, 0.18, 1], 0, MAT.WOOD);
-        localS("box", w * 0.44, 1.14, 0, 0, 0, 0, 0.28, 0.1, d + 0.12, [0.46, 0.31, 0.18, 1], 0, MAT.WOOD);
-      } else if (s.type === "pond") {
-        localS("cyl", 0, -0.1, 0, 0, 0, 0, w + 0.7, 0.24, d + 0.7, [0.48, 0.44, 0.38, 1], 0, MAT.GRAVEL, { castShadow: false });
-        localS("cyl", 0, 0.04, 0, 0, 0, 0, w, 0.16, d, [0.06, 0.46, 0.7, 0.9], emSel, MAT.WATER, { castShadow: false });
-        for (let r = 0; r < 6; r++) {
-          const ang = (r / 6) * Math.PI * 2 + 0.3;
-          const rx = s.x + Math.cos(ang) * (w * 0.46);
-          const rz = s.z + Math.sin(ang) * (d * 0.46);
-          drawMesh("sphere", rx, H(rx, rz) - 0.05, rz, 0, ang, 0, 0.55, 0.32, 0.5, [0.55, 0.52, 0.47, 1], 0, MAT.STONE);
-          if (r % 2 === 0) {
-            drawMesh("leafCluster", rx + 0.25, H(rx, rz), rz, 0, r, 0, 0.45, 0.75, 0.45, [0.22, 0.58, 0.24, 1], 0, MAT.FOLIAGE, { windAmt: foliageWind });
-          }
-        }
-      } else if (s.type === "water_tank") {
-        addPlinth(w, d, [0.54, 0.56, 0.58, 1]);
-        localS("cyl", 0, 0.08, 0, 0, 0, 0, w, h, d, [0.68, 0.76, 0.84, 1], emSel, MAT.METAL);
-        localS("cyl", 0, 0.08 + h * 0.35, 0, 0, 0, 0, w * 1.03, 0.12, d * 1.03, [0.12, 0.52, 0.82, 1], 0, MAT.METAL);
-        localS("cyl", 0, 0.08 + h, 0, 0, 0, 0, w * 1.05, 0.22, d * 1.05, [0.1, 0.42, 0.7, 1], 0, MAT.METAL);
-      } else if (s.type === "well_pump") {
-        addPlinth(w, d);
-        localS("cyl", 0, 0.05, 0, 0, 0, 0, w * 0.88, 0.88, d * 0.88, [0.68, 0.63, 0.56, 1], emSel, MAT.STONE);
-        localS("cyl", 0, 0.75, 0, 0, 0, 0, w * 0.68, 0.08, d * 0.68, [0.08, 0.48, 0.76, 1], 0, MAT.WATER, { castShadow: false });
-        localS("cyl", -w * 0.38, 0.85, 0, 0, 0, 0, 0.12, 1.15, 0.12, [0.46, 0.3, 0.16, 1], 0, MAT.WOOD);
-        localS("cyl", w * 0.38, 0.85, 0, 0, 0, 0, 0.12, 1.15, 0.12, [0.46, 0.3, 0.16, 1], 0, MAT.WOOD);
-        localS("cyl", w * 0.39, 1.38, 0, 0, 0, Math.PI / 2, 0.1, w * 0.78, 0.1, [0.4, 0.25, 0.14, 1], 0, MAT.WOOD);
-        localS("roof", 0, 1.92, 0, 0, 0, 0, w + 0.25, 0.62, d + 0.25, [0.72, 0.3, 0.18, 1], emSel, MAT.TILE);
-      } else if (s.type === "solar_array") {
-        localS("cyl", -w * 0.34, -0.3, 0, 0, 0, 0, 0.18, 1.3, 0.18, [0.64, 0.68, 0.72, 1], 0, MAT.METAL);
-        localS("cyl", w * 0.34, -0.3, 0, 0, 0, 0, 0.18, 1.3, 0.18, [0.64, 0.68, 0.72, 1], 0, MAT.METAL);
-        localS("box", 0, 1.02, 0, 0.48, 0, 0, w + 0.14, 0.08, d + 0.14, [0.74, 0.78, 0.82, 1], 0, MAT.METAL);
-        localS("box", 0, 1.07, 0, 0.48, 0, 0, w, 0.08, d, [0.09, 0.22, 0.56, 1], (sun.isDay ? 0.08 : 0) + emSel, MAT.GLASS);
-      } else if (s.type === "wind_turbine") {
-        addPlinth(1.8, 1.8, [0.56, 0.58, 0.6, 1]);
-        localS("cyl", 0, 0.08, 0, 0, 0, 0, 0.42, h, 0.42, [0.9, 0.93, 0.96, 1], emSel, MAT.METAL);
-        localS("box", 0, h - 0.1, 0.08, 0, 0, 0, 0.56, 0.52, 1.15, [0.94, 0.96, 0.98, 1], emSel, MAT.METAL);
-        localS("sphere", 0, h + 0.42, -0.25, 0, 0, 0, 0.14, 0.14, 0.14, [0.96, 0.18, 0.18, 1], Math.sin(this.elapsed * 4) > 0 ? 0.9 : 0.1);
-        localS("cone", 0, h + 0.16, 0.62, Math.PI / 2, 0, 0, 0.36, 0.36, 0.36, [0.88, 0.92, 0.96, 1], 0, MAT.METAL);
-        const spin = this.elapsed * (0.4 + windSpeed * 0.12);
-        for (let b = 0; b < 3; b++) {
-          const ang = spin + (b * Math.PI * 2) / 3;
-          localS("blade", 0, h + 0.16, 0.76, 0, 0, ang, 1.5, 3.1, 1.5, [0.97, 0.98, 1.0, 1], emSel, MAT.METAL);
-        }
-      } else if (s.type === "weather_station") {
-        localS("cyl", 0, -0.2, 0, 0, 0, 0, 0.14, h + 0.2, 0.14, [0.78, 0.83, 0.88, 1], emSel, MAT.METAL);
-        localS("box", 0, h * 0.56, 0, 0, 0, 0, 0.52, 0.46, 0.42, [0.95, 0.97, 0.98, 1], 0.05);
-        localS("box", 0.32, h * 0.72, 0.12, 0.5, 0, 0, 0.36, 0.04, 0.28, [0.1, 0.24, 0.55, 1], 0, MAT.GLASS);
-        localS("box", 0, h - 0.06, 0, 0, this.elapsed * (0.6 + windSpeed * 0.18), 0, 1.15, 0.08, 0.1, [0.22, 0.78, 0.98, 1], 0.2, MAT.METAL);
-      } else if (s.type === "compost") {
-        for (let b = -1; b <= 1; b++) {
-          localS("box", b * 1.25, 0, 0, 0, 0, 0, 1.15, 0.72, d * 0.9, [0.44, 0.29, 0.16, 1], emSel, MAT.WOOD);
-          localS("sphere", b * 1.25, 0.32, 0, 0, 0, 0, 0.98, 0.65 - (b + 1) * 0.1, d * 0.78, [0.28 - (b + 1) * 0.04, 0.19, 0.1, 1], 0, MAT.SOIL);
-        }
-      } else if (s.type === "apiary") {
-        localS("box", 0, 0, 0, 0, 0, 0, w * 0.95, 0.25, 0.52, [0.46, 0.31, 0.18, 1], 0, MAT.WOOD);
-        for (let r = -1.5; r <= 1.5; r += 1) {
-          localS("box", r * 0.76, 0.25, 0, 0, 0, 0, 0.58, 0.68, 0.58, [0.94, 0.8, 0.28, 1], emSel, MAT.WOOD);
-          localS("roof", r * 0.76, 0.93, 0, 0, 0, 0, 0.68, 0.18, 0.68, [0.68, 0.72, 0.76, 1], 0, MAT.METAL);
-        }
-        for (let bee = 0; bee < 4; bee++) {
-          const ba = this.elapsed * 3.5 + bee * 1.57;
-          localS("sphere", Math.cos(ba) * 1.2, 1.25 + Math.sin(ba * 2) * 0.2, Math.sin(ba) * 0.8 + 0.5, 0, 0, 0, 0.08, 0.08, 0.08, [0.98, 0.85, 0.15, 1], 0.3, MAT.DEFAULT, { castShadow: false });
-        }
-      }
-
-      const effW = Math.abs(cosR) * w + Math.abs(sinR) * d;
-      const effD = Math.abs(sinR) * w + Math.abs(cosR) * d;
-      this.hitBoxes.push({ kind: "structure", id: s.id, label: s.label, x: s.x, z: s.z, w: effW, d: effD, y0: sy, y1: sy + Math.max(0.8, h), data: s });
-      if (s.type !== "path_dirt" && s.type !== "road_paved" && s.type !== "river_seg" && s.type !== "tarp_pad") {
-        addArPin(s.id, s.label, s.x, sy + h + 0.5, s.z, false);
-      }
+    // 3. Contours cadastraux jaunes
+    const cadSig = `${this._terrainSig}|${JSON.stringify(state.farm?.cadastralParcels || [])}`;
+    if (cadSig !== this._cadastralSig) {
+      this._cadastralSig = cadSig;
+      this._disposeGroupGeometries(this.cadastralGroup);
+      const { group, arPins } = buildCadastralParcelsPbr(state, this.geos, this.mats, H);
+      this.cadastralGroup.add(group);
+      this.cadastralPinDescs = arPins;
     }
 
-    // --- 5. Tous les lots d'animaux en 3D sur la ferme ---
-    const coopStruct = state.structures.find((s) => s.type === "coop_mobile" || s.type === "coop_fixed");
-    const padStruct = state.structures.find((s) => s.type === "paddock") || state.structures.find((s) => s.type === "barn_livestock");
-    const pondStruct = state.structures.find((s) => s.type === "pond");
-    const poultryPad = coopStruct && !state.livestock.some((l) => l.kind === "elevage")
-      ? state.structures.find((s) => s.type === "paddock" && Math.hypot(s.x - coopStruct.x, s.z - coopStruct.z) < 6.5)
+    // 4. Parcelles, cultures, batiments, flux & GLB
+    const dayKey = `${state.simulation.dayOffset || 0}|${state.simulation.scenario || "normal"}|${sun.isDay ? 1 : 0}`;
+    const structProps = (state.structures || []).map((s) => `${s.id}:${s.doorOpen}:${s.scale || 1}:${s.modelUrl || ""}:${s.lightRoof ? 1 : 0}`).join(",");
+    const plotProps = (state.plots || []).map((p) => `${p.id}:${p.cropId}:${p.irrigationValveOpen}:${p.ventOpeningPct}:${p.moisturePct}:${p.diseaseRisk}:${p.biTunnel ? 1 : 0}`).join(",");
+    const staticSig = `${layoutSig}|${this._terrainSig}|${dayKey}|${this.overlay}|${this.selectedId}|${structProps}|${plotProps}|${this.glbCache.size}`;
+
+    if (staticSig !== this._staticSig) {
+      this._staticSig = staticSig;
+      this._disposeGroupGeometries(this.staticGroup);
+
+      const snapMap = new Map((forecastSnapshot?.plotSnapshots || []).map((s) => [s.id, s]));
+      const plotsRes = buildPlotsAndCropsPbr(state, snapMap, this.geos, this.mats, this.overlay, this.selectedId, sun.isDay, H);
+      const structRes = buildStructuresPbr(state, this.geos, this.mats, sun.isDay, this.selectedId, H, this.glbCache, (u) => this.loadGlbModel(u));
+
+      this.staticGroup.add(plotsRes.group, structRes.group);
+
+      // Calque flux energie/eau
+      if (this.overlay === "energy") {
+        const solar = (state.structures || []).find((s) => s.type === "solar_array");
+        const tank = (state.structures || []).find((s) => s.type === "water_tank");
+        const ghPlots = (state.plots || []).filter((p) => p.zone === "Serre");
+        if (solar) {
+          const eMat = this.mats.getVariant("standard", 0xfacc15, { emissive: 0.7, opacity: 0.82 });
+          ghPlots.forEach((g) => {
+            const mx = (solar.x + g.x) / 2, mz = (solar.z + g.z) / 2;
+            const dist = Math.hypot(g.x - solar.x, g.z - solar.z);
+            const ang = Math.atan2(g.x - solar.x, g.z - solar.z);
+            const bar = new THREE.Mesh(this.geos.box, eMat);
+            bar.position.set(mx, H(mx, mz) + 2.2, mz);
+            bar.rotation.y = ang;
+            bar.scale.set(0.16, 0.16, dist);
+            this.staticGroup.add(bar);
+          });
+        }
+        if (tank) {
+          const wMat = this.mats.getVariant("standard", 0x38bdf8, { emissive: 0.6, opacity: 0.78 });
+          (state.plots || []).forEach((p) => {
+            const mx = (tank.x + p.x) / 2, mz = (tank.z + p.z) / 2;
+            const dist = Math.hypot(p.x - tank.x, p.z - tank.z);
+            const ang = Math.atan2(p.x - tank.x, p.z - tank.z);
+            const bar = new THREE.Mesh(this.geos.box, wMat);
+            bar.position.set(mx, H(mx, mz) + 0.5, mz);
+            bar.rotation.y = ang;
+            bar.scale.set(0.14, 0.14, dist);
+            this.staticGroup.add(bar);
+          });
+        }
+      }
+
+      this.animItems = [...plotsRes.animItems, ...structRes.animItems];
+      this.staticHitBoxes = [...plotsRes.hitBoxes, ...structRes.hitBoxes];
+      this.staticArPinDescs = [...plotsRes.arPins, ...structRes.arPins];
+    }
+
+    // 5. Cheptel persistant anime sans reallocation
+    const coopStruct = (state.structures || []).find((s) => s.type === "coop_mobile" || s.type === "coop_fixed");
+    const padStruct = (state.structures || []).find((s) => s.type === "paddock") || (state.structures || []).find((s) => s.type === "barn_livestock");
+    const pondStruct = (state.structures || []).find((s) => s.type === "pond");
+    const poultryPad = coopStruct && !(state.livestock || []).some((l) => l.kind === "elevage")
+      ? (state.structures || []).find((s) => s.type === "paddock" && Math.hypot(s.x - coopStruct.x, s.z - coopStruct.z) < 6.5)
       : null;
 
-    state.livestock.forEach((lot, lotIdx) => {
-      const spId = lot.speciesId || (lot.kind === "ponte" ? "ponte" : "bovin_lait");
-      let centerX = 8 + lotIdx * 2.5;
-      let centerZ = 7;
-      let spanX = 3.2, spanZ = 2.2;
+    const lvSig = `${(state.livestock || []).map((l) => `${l.id}:${l.speciesId}:${l.count}:${l.kind}`).join("|")}|${coopStruct?.x}:${coopStruct?.z}|${padStruct?.x}:${padStruct?.z}|${poultryPad?.id || ""}|${pondStruct?.id || ""}`;
+    if (lvSig !== this._livestockSig) {
+      this._livestockSig = lvSig;
+      this._disposeGroupGeometries(this.livestockGroup);
+      this.animalAgents = [];
 
-      if (spId === "ponte" && poultryPad) {
-        centerX = poultryPad.x;
-        centerZ = poultryPad.z;
-        spanX = Math.max(0.7, (poultryPad.w || 3) * 0.34);
-        spanZ = Math.max(0.7, (poultryPad.d || 3.2) * 0.34);
-      } else if (spId === "ponte" && coopStruct) {
-        centerX = coopStruct.x;
-        centerZ = coopStruct.z + 1.5;
-        spanX = 2.0; spanZ = 0.8;
-      } else if (spId === "canard" && pondStruct) {
-        centerX = pondStruct.x + 2.4;
-        centerZ = pondStruct.z - 0.4;
-        spanX = 1.6; spanZ = 1.0;
-      } else if (padStruct) {
-        const halfW = Math.max(1.2, (padStruct.w || 10) * 0.5 - 1.15);
-        const halfD = Math.max(0.8, (padStruct.d || 4.4) * 0.5 - 0.95);
-        const offsetX = lotIdx % 2 === 0 ? -halfW * 0.42 : halfW * 0.42;
-        const offsetZ = lotIdx > 2 ? halfD * 0.35 : -halfD * 0.35;
-        centerX = padStruct.x + offsetX;
-        centerZ = padStruct.z + offsetZ;
-        spanX = Math.max(0.8, halfW - Math.abs(offsetX));
-        spanZ = Math.max(0.5, halfD - Math.abs(offsetZ));
+      (state.livestock || []).forEach((lot, lotIdx) => {
+        const spId = lot.speciesId || (lot.kind === "ponte" ? "ponte" : "bovin_lait");
+        let centerX = 8 + lotIdx * 2.5, centerZ = 7, spanX = 3.2, spanZ = 2.2;
+        if (spId === "ponte" && poultryPad) {
+          centerX = poultryPad.x; centerZ = poultryPad.z;
+          spanX = Math.max(0.7, (poultryPad.w || 3) * 0.34);
+          spanZ = Math.max(0.7, (poultryPad.d || 3.2) * 0.34);
+        } else if (spId === "ponte" && coopStruct) {
+          centerX = coopStruct.x; centerZ = coopStruct.z + 1.5; spanX = 2.0; spanZ = 0.8;
+        } else if (spId === "canard" && pondStruct) {
+          centerX = pondStruct.x + 2.4; centerZ = pondStruct.z - 0.4; spanX = 1.6; spanZ = 1.0;
+        } else if (padStruct) {
+          const halfW = Math.max(1.2, (padStruct.w || 10) * 0.5 - 1.15);
+          const halfD = Math.max(0.8, (padStruct.d || 4.4) * 0.5 - 0.95);
+          const offsetX = lotIdx % 2 === 0 ? -halfW * 0.42 : halfW * 0.42;
+          const offsetZ = lotIdx > 2 ? halfD * 0.35 : -halfD * 0.35;
+          centerX = padStruct.x + offsetX; centerZ = padStruct.z + offsetZ;
+          spanX = Math.max(0.8, halfW - Math.abs(offsetX));
+          spanZ = Math.max(0.5, halfD - Math.abs(offsetZ));
+        }
+
+        const visCount = spId === "ponte" ? Math.min(8, Math.max(3, Math.ceil(lot.count / 80))) : Math.min(5, Math.max(2, Math.ceil(lot.count / 12)));
+        for (let i = 0; i < visCount; i++) {
+          const mesh = buildAnimalMeshPbr(spId, i + lotIdx, this.geos, this.mats);
+          this.livestockGroup.add(mesh);
+          this.animalAgents.push({ mesh, lot, lotIdx, idx: i, spId, centerX, centerZ, spanX, spanZ });
+        }
+      });
+    }
+
+    // 6. Robots persistants animes
+    const bots = (state.equipment || []).filter((e) => e.autonomous);
+    const robotSig = `${bots.map((b) => `${b.id}:${b.kind}:${b.status}`).join("|")}|${sun.isDay ? 1 : 0}`;
+    if (robotSig !== this._robotSig) {
+      this._robotSig = robotSig;
+      this._disposeGroupGeometries(this.robotGroup);
+      this.robotAgents = [];
+      for (const eq of bots) {
+        const mesh = buildRobotMeshPbr(eq, this.geos, this.mats, sun.isDay);
+        this.robotGroup.add(mesh);
+        this.robotAgents.push({ eq, mesh });
       }
+    }
 
-      const visCount = spId === "ponte" ? Math.min(8, Math.max(3, Math.ceil(lot.count / 80))) : Math.min(5, Math.max(2, Math.ceil(lot.count / 12)));
-      for (let i = 0; i < visCount; i++) {
-        const phase = this.elapsed * (spId === "ponte" || spId === "canard" ? 1.15 : 0.38) + i * 1.9 + lotIdx;
-        const ax = centerX + Math.sin(phase * 0.7 + i) * spanX;
-        const az = centerZ + Math.cos(phase * 0.5 + i * 1.3) * spanZ;
-        const yaw = Math.atan2(Math.cos(phase * 0.7 + i), -Math.sin(phase * 0.5 + i * 1.3));
-        drawAnimal3D(spId, ax, az, yaw, phase * 3.2, i + lotIdx);
+    // 7. Animations par frame
+    if (this.mats.waterBump) {
+      this.mats.waterBump.offset.x = (this.elapsed * 0.045) % 1;
+      this.mats.waterBump.offset.y = (this.elapsed * 0.025) % 1;
+    }
+    for (const item of this.animItems) {
+      if (item.kind === "rotorZ") item.mesh.rotation.z = this.elapsed * item.speed;
+      else if (item.kind === "spinY") item.mesh.rotation.y = this.elapsed * ((state.weather?.current?.windKmh || 12) * 0.18 + 0.6);
+      else if (item.kind === "drop") {
+        const p = (this.elapsed * 2.5 + item.phase) % 1;
+        item.mesh.position.y = item.baseY + p * 0.75;
+      } else if (item.kind === "smoke") {
+        const p = (this.elapsed * 0.35 + item.phase) % 1;
+        item.mesh.position.set(item.baseX + Math.sin(this.elapsed + item.phase * 6) * 0.2, item.baseY + p * 1.9, item.baseZ);
+        const sc = 0.28 + p * 0.55;
+        item.mesh.scale.set(sc, sc * 0.8, sc);
+      } else if (item.kind === "bee") {
+        const ba = this.elapsed * 3.5 + item.idx * 1.57;
+        item.mesh.position.set(Math.cos(ba) * 1.2, 1.25 + Math.sin(ba * 2) * 0.2, Math.sin(ba) * 0.8 + 0.5);
       }
+    }
 
-      const cy = H(centerX, centerZ);
-      this.hitBoxes.push({ kind: "livestock", id: lot.id, label: lot.name, x: centerX, z: centerZ, w: spanX * 2, d: spanZ * 2, y0: cy, y1: cy + 1.6, data: lot });
-      addArPin(lot.id, `${lot.name} (${lot.count})`, centerX, cy + 1.8, centerZ, false);
-    });
+    for (const ag of this.animalAgents) {
+      const phase = this.elapsed * (ag.spId === "ponte" || ag.spId === "canard" ? 1.15 : 0.38) + ag.idx * 1.9 + ag.lotIdx;
+      const ax = ag.centerX + Math.sin(phase * 0.7 + ag.idx) * ag.spanX;
+      const az = ag.centerZ + Math.cos(phase * 0.5 + ag.idx * 1.3) * ag.spanZ;
+      const yaw = Math.atan2(Math.cos(phase * 0.7 + ag.idx), -Math.sin(phase * 0.5 + ag.idx * 1.3));
+      ag.mesh.position.set(ax, H(ax, az), az);
+      ag.mesh.rotation.y = yaw;
+      if (ag.mesh.userData.legs?.length === 4) {
+        const swing = Math.sin(phase * 3.2) * 0.26;
+        ag.mesh.userData.legs[0].rotation.x = swing;
+        ag.mesh.userData.legs[1].rotation.x = -swing;
+        ag.mesh.userData.legs[2].rotation.x = -swing;
+        ag.mesh.userData.legs[3].rotation.x = swing;
+      }
+    }
 
-    // --- 6. Robots mobiles 3D detailles ---
-    for (const eq of state.equipment) {
-      if (!eq.autonomous) continue;
-      const rx = eq.x ?? 10;
-      const rz = eq.z ?? -6;
+    const dynamicHitBoxes = [];
+    const dynamicPins = [];
+    const seenLotPins = new Set();
+    for (const ag of this.animalAgents) {
+      if (seenLotPins.has(ag.lot.id)) continue;
+      seenLotPins.add(ag.lot.id);
+      const cy = H(ag.centerX, ag.centerZ);
+      dynamicHitBoxes.push({ kind: "livestock", id: ag.lot.id, label: ag.lot.name, x: ag.centerX, z: ag.centerZ, w: ag.spanX * 2, d: ag.spanZ * 2, y0: cy, y1: cy + 1.6, data: ag.lot });
+      dynamicPins.push({ id: ag.lot.id, label: `${ag.lot.name} (${ag.lot.count})`, x: ag.centerX, y: cy + 1.8, z: ag.centerZ, warn: false });
+    }
+
+    for (const ra of this.robotAgents) {
+      const eq = ra.eq;
+      const rx = eq.x ?? 10, rz = eq.z ?? -6;
       const ry = H(rx, rz);
-      const isSel = this.selectedId === eq.id;
-      const emSel = isSel ? 0.28 : 0;
-      const heading = eq.heading ?? 0;
-
       if (eq.kind === "drone") {
         const yAlt = ry + (eq.status === "working" ? 4.4 + Math.sin(this.elapsed * 3) * 0.2 : 1.0);
-        const locD = makeLocal(rx, yAlt, rz, this.elapsed * 0.45);
-        locD("box", 0, 0, 0, 0, 0, 0, 0.48, 0.14, 0.65, [0.16, 0.22, 0.28, 1], emSel, MAT.METAL);
-        locD("sphere", 0, -0.06, 0.22, 0, 0, 0, 0.16, 0.14, 0.16, [0.15, 0.78, 0.96, 1], 0.35);
-        for (const [ax, az] of [[-0.48, -0.48], [0.48, -0.48], [-0.48, 0.48], [0.48, 0.48]]) {
-          locD("box", ax * 0.5, 0.04, az * 0.5, 0, Math.atan2(ax, az), 0, 0.07, 0.05, 0.68, [0.3, 0.34, 0.38, 1], 0, MAT.METAL);
-          locD("cyl", ax, 0.08, az, 0, this.elapsed * 18, 0, 0.46, 0.02, 0.46, [0.22, 0.86, 0.98, 0.45], 0.2, MAT.DEFAULT, { castShadow: false });
-        }
-        if (eq.status === "working") {
-          drawMesh("cone", rx, ry + 0.1, rz, 0, 0, 0, 2.2, yAlt - ry - 0.1, 2.2, [0.2, 0.95, 0.55, 0.16], 0.4, MAT.DEFAULT, { castShadow: false });
-        }
-        this.hitBoxes.push({ kind: "robot", id: eq.id, label: eq.name, x: rx, z: rz, w: 1.8, d: 1.8, y0: ry, y1: yAlt + 0.8, data: eq });
-        addArPin(eq.id, `🚁 ${eq.name} (${Math.round(eq.batteryPct)}%)`, rx, yAlt + 0.8, rz, eq.batteryPct < 25);
-      } else if (eq.kind === "tractor") {
-        const locT = makeLocal(rx, ry, rz, heading);
-        locT("box", 0, 0.34, 0.35, 0, 0, 0, 1.0, 0.75, 1.45, [0.14, 0.58, 0.28, 1], emSel, MAT.METAL);
-        locT("box", 0, 0.48, 1.09, 0, 0, 0, 0.82, 0.46, 0.06, [0.14, 0.16, 0.18, 1]);
-        locT("box", -0.34, 0.62, 1.1, 0, 0, 0, 0.18, 0.12, 0.06, [1.0, 0.92, 0.68, 1], sun.isDay ? 0.2 : 0.9);
-        locT("box", 0.34, 0.62, 1.1, 0, 0, 0, 0.18, 0.12, 0.06, [1.0, 0.92, 0.68, 1], sun.isDay ? 0.2 : 0.9);
-        locT("box", 0, 0.95, -0.45, 0, 0, 0, 1.12, 0.92, 1.05, [0.68, 0.86, 0.96, 0.68], emSel, MAT.GLASS);
-        locT("box", 0, 1.88, -0.45, 0, 0, 0, 1.18, 0.1, 1.12, [0.14, 0.58, 0.28, 1], emSel, MAT.METAL);
-        locT("sphere", 0, 1.98, -0.25, 0, 0, 0, 0.26, 0.14, 0.26, [0.95, 0.72, 0.14, 1], 0.25);
-        // Roues avant et grosses roues arriere
-        for (const [wx, wz, r, wt] of [[-0.68, 0.78, 0.58, 0.24], [0.68, 0.78, 0.58, 0.24], [-0.74, -0.58, 0.9, 0.34], [0.74, -0.58, 0.9, 0.34]]) {
-          locT("cyl", wx + wt * 0.5, r * 0.5, wz, 0, 0, Math.PI / 2, r, wt, r, [0.14, 0.15, 0.17, 1]);
-          locT("cyl", wx + wt * 0.45 + (wx > 0 ? 0.03 : -0.03), r * 0.5, wz, 0, 0, Math.PI / 2, r * 0.46, wt * 0.9, r * 0.46, [0.88, 0.78, 0.22, 1]);
-        }
-        // Outil attelage arriere
-        locT("box", 0, 0.22, -1.35, 0, 0, 0, 1.5, 0.24, 0.55, [0.85, 0.26, 0.18, 1], 0, MAT.METAL);
-        this.hitBoxes.push({ kind: "robot", id: eq.id, label: eq.name, x: rx, z: rz, w: 2.0, d: 2.8, y0: ry, y1: ry + 2.4, data: eq });
-        addArPin(eq.id, `🚜 ${eq.name} (${Math.round(eq.batteryPct)}%)`, rx, ry + 2.4, rz, eq.batteryPct < 25);
+        ra.mesh.position.set(rx, yAlt, rz);
+        ra.mesh.rotation.y = this.elapsed * 0.45;
+        for (const rt of ra.mesh.userData.rotors || []) rt.rotation.y = this.elapsed * 22;
+        if (ra.mesh.userData.beam) ra.mesh.userData.beam.visible = eq.status === "working";
+        dynamicHitBoxes.push({ kind: "robot", id: eq.id, label: eq.name, x: rx, z: rz, w: 1.8, d: 1.8, y0: ry, y1: yAlt + 0.8, data: eq });
+        dynamicPins.push({ id: eq.id, label: `🚁 ${eq.name} (${Math.round(eq.batteryPct)}%)`, x: rx, y: yAlt + 0.8, z: rz, warn: eq.batteryPct < 25 });
       } else {
-        // Rover desherbeur solaire
-        const locR = makeLocal(rx, ry, rz, heading);
-        locR("box", 0, 0.22, 0, 0, 0, 0, 1.05, 0.34, 1.15, [0.94, 0.62, 0.14, 1], emSel, MAT.METAL);
-        locR("box", 0, 0.58, 0, 0.15, 0, 0, 1.08, 0.07, 1.12, [0.09, 0.24, 0.56, 1], 0.12, MAT.GLASS);
-        locR("sphere", 0, 0.42, 0.62, 0, 0, 0, 0.18, 0.14, 0.16, [0.18, 0.88, 0.48, 1], 0.45);
-        for (const [wx, wz] of [[-0.6, 0.44], [0.6, 0.44], [-0.6, -0.44], [0.6, -0.44]]) {
-          locR("cyl", wx + 0.08, 0.2, wz, 0, 0, Math.PI / 2, 0.4, 0.16, 0.4, [0.15, 0.16, 0.18, 1]);
-        }
-        this.hitBoxes.push({ kind: "robot", id: eq.id, label: eq.name, x: rx, z: rz, w: 1.5, d: 1.5, y0: ry, y1: ry + 1.4, data: eq });
-        addArPin(eq.id, `🤖 ${eq.name} (${Math.round(eq.batteryPct)}%)`, rx, ry + 1.3, rz, eq.batteryPct < 25);
+        ra.mesh.position.set(rx, ry, rz);
+        ra.mesh.rotation.y = eq.heading ?? 0;
+        const hPin = eq.kind === "tractor" ? 2.4 : 1.3;
+        const icon = eq.kind === "tractor" ? "🚜" : "🤖";
+        dynamicHitBoxes.push({ kind: "robot", id: eq.id, label: eq.name, x: rx, z: rz, w: eq.kind === "tractor" ? 2.0 : 1.5, d: eq.kind === "tractor" ? 2.8 : 1.5, y0: ry, y1: ry + hPin, data: eq });
+        dynamicPins.push({ id: eq.id, label: `${icon} ${eq.name} (${Math.round(eq.batteryPct)}%)`, x: rx, y: ry + hPin, z: rz, warn: eq.batteryPct < 25 });
       }
     }
 
-    // --- 7. Calque Flux Energie & Eau ---
-    if (this.overlay === "energy") {
-      const solar = state.structures.find((s) => s.type === "solar_array");
-      const tank = state.structures.find((s) => s.type === "water_tank");
-      if (solar) {
-        ghPlots.forEach((g) => {
-          const mx = (solar.x + g.x) / 2, mz = (solar.z + g.z) / 2;
-          const dist = Math.hypot(g.x - solar.x, g.z - solar.z);
-          const ang = Math.atan2(g.x - solar.x, g.z - solar.z);
-          drawMesh("box", mx, H(mx, mz) + 2.2, mz, 0, ang, 0, 0.16, 0.16, dist, [0.98, 0.8, 0.16, 0.82], 0.55, MAT.DEFAULT, { castShadow: false });
-        });
-      }
-      if (tank) {
-        state.plots.forEach((p) => {
-          const mx = (tank.x + p.x) / 2, mz = (tank.z + p.z) / 2;
-          const dist = Math.hypot(p.x - tank.x, p.z - tank.z);
-          const ang = Math.atan2(p.x - tank.x, p.z - tank.z);
-          drawMesh("box", mx, H(mx, mz) + 0.5, mz, 0, ang, 0, 0.14, 0.14, dist, [0.16, 0.72, 0.98, 0.78], 0.45, MAT.DEFAULT, { castShadow: false });
-        });
+    // Pluie 3D
+    const rainMm = state.weather?.current?.rainMm || 0;
+    this.rainGroup.visible = rainMm > 0.5;
+    if (this.rainGroup.visible) {
+      const span = state.farm?.gridSize || 44;
+      const activeCount = Math.min(this.rainDrops.length, Math.round(rainMm * 6));
+      for (let i = 0; i < this.rainDrops.length; i++) {
+        const dm = this.rainDrops[i];
+        dm.visible = i < activeCount;
+        if (dm.visible) {
+          const px = ((i * 7.3) % span) - span / 2;
+          const pz = ((i * 11.7) % span) - span / 2;
+          const py = 12 - ((this.elapsed * 15 + i * 1.7) % 12);
+          dm.position.set(px, py, pz);
+        }
       }
     }
 
-    // --- 8. Serres detaillees (Tunnel courbe + arceaux acier OU Serre verre Venlo) ---
-    for (const g of ghPlots) {
-      const w = g.w || 8.5, d = g.d || 4.2, rot = g.rot || 0;
-      const gy = H(g.x, g.z);
-      const isSel = this.selectedId === g.id;
-      const isGlass = g.structureStyle === "glass_house" || (w >= 9.5 && d >= 6);
-      const ghEm = (!sun.isDay ? 0.35 : 0) + (isSel ? 0.25 : 0);
-      const tint = this.overlay === "disease" && g.diseaseRisk > 35
-        ? [0.95, 0.35, 0.35, 0.38]
-        : isGlass ? [0.76, 0.92, 1.0, 0.32] : [0.72, 0.9, 0.98, 0.34];
-      const locG = makeLocal(g.x, gy, g.z, rot);
-      const ventTilt = ((g.ventOpeningPct || 20) / 100) * 0.42;
-
-      if (isGlass) {
-        // Serre Venlo multi-chapelles vitree avec montants aluminium & ouvrants faitiers
-        locG("box", 0, 0.02, 0, 0, 0, 0, w, 2.2, d, tint, ghEm, MAT.GLASS);
-        locG("roof", 0, 2.22 + ventTilt * 0.25, 0, ventTilt * 0.55, 0, 0, w + 0.08, 1.25, d + 0.08, [0.8, 0.94, 1.0, 0.38], ghEm, MAT.GLASS);
-        for (let m = -2; m <= 2; m++) {
-          const mx = (m / 2) * (w * 0.46);
-          locG("box", mx, 0.02, d * 0.5, 0, 0, 0, 0.09, 2.22, 0.09, [0.78, 0.82, 0.86, 1], 0, MAT.METAL);
-          locG("box", mx, 0.02, -d * 0.5, 0, 0, 0, 0.09, 2.22, 0.09, [0.78, 0.82, 0.86, 1], 0, MAT.METAL);
-        }
-      } else if (g.biTunnel) {
-        // Bi-tunnel double voute accolee avec cheneau central (serre maraichere teintee vert)
-        const bayD = d * 0.5;
-        const biTint = this.overlay === "disease" && g.diseaseRisk > 35
-          ? [0.95, 0.35, 0.35, 0.38]
-          : [0.66, 0.88, 0.80, 0.36];
-        for (const bz of [-bayD * 0.5, bayD * 0.5]) {
-          locG("arch", 0, 0.02, bz, 0, Math.PI / 2, 0, bayD, 2.75, w, biTint, ghEm, MAT.GLASS);
-          for (let r = 0; r < 5; r++) {
-            const rx = ((r / 4) - 0.5) * (w * 0.96);
-            locG("archRib", rx, 0.02, bz, 0, Math.PI / 2, 0, bayD + 0.04, 2.78, 0.08, [0.75, 0.79, 0.83, 1], 0, MAT.METAL);
-          }
-          locG("cyl", w * 0.5, 2.74, bz, 0, 0, Math.PI / 2, 0.06, w, 0.06, [0.75, 0.79, 0.83, 1], 0, MAT.METAL);
-        }
-        locG("box", 0, 0.06, 0, 0, 0, 0, w, 0.14, 0.14, [0.72, 0.76, 0.8, 1], 0, MAT.METAL);
-      } else {
-        // Serre tunnel courbe avec arceaux galvanises visibles
-        locG("arch", 0, 0.02, 0, 0, Math.PI / 2, 0, d, 2.95, w, tint, ghEm, MAT.GLASS);
-        const ribCount = 5;
-        for (let r = 0; r < ribCount; r++) {
-          const rx = ((r / (ribCount - 1)) - 0.5) * (w * 0.96);
-          locG("archRib", rx, 0.02, 0, 0, Math.PI / 2, 0, d + 0.06, 2.98, 0.09, [0.75, 0.79, 0.83, 1], 0, MAT.METAL);
-        }
-        // Pannes longitudinales & ouvrant lateral plaque sur la voute
-        locG("cyl", w * 0.5, 2.94, 0, 0, 0, Math.PI / 2, 0.07, w, 0.07, [0.75, 0.79, 0.83, 1], 0, MAT.METAL);
-        if ((g.ventOpeningPct || 0) > 10) {
-          locG("box", 0, 2.08, d * 0.34, -0.62 - ventTilt, 0, 0, w * 0.72, 0.05, 0.5, [0.85, 0.95, 1.0, 0.48], ghEm, MAT.GLASS);
-        }
-      }
-
-      if (!sun.isDay) {
-        locG("sphere", -w * 0.25, 2.35, 0, 0, 0, 0, 0.26, 0.22, 0.26, [1.0, 0.85, 0.48, 1], 0.95);
-        locG("sphere", w * 0.25, 2.35, 0, 0, 0, 0, 0.26, 0.22, 0.26, [1.0, 0.85, 0.48, 1], 0.95);
-      }
-    }
-
-    // --- 9. Fantome de construction 3D ou cercle de sculpture ---
+    // Fantome construction ou cercle sculpture
+    this.ghostBox.visible = false;
+    this.ghostCyl.visible = false;
     if (this.sculptMode.active && this.buildMode.hoverValid) {
       const hy = H(this.buildMode.hoverX, this.buildMode.hoverZ);
       const r = this.sculptMode.radius * 2;
-      drawMesh("cyl", this.buildMode.hoverX, hy + 0.06, this.buildMode.hoverZ, 0, 0, 0, r, 0.14, r, [0.98, 0.68, 0.16, 0.42], 0.45, MAT.DEFAULT, { castShadow: false });
+      this.ghostMat.color.setHex(0xfab028);
+      this.ghostCyl.position.set(this.buildMode.hoverX, hy + 0.06, this.buildMode.hoverZ);
+      this.ghostCyl.scale.set(r, 0.14, r);
+      this.ghostCyl.visible = true;
     } else if (this.buildMode.active && this.buildMode.hoverValid) {
-      const cat = BUILDING_CATALOG.find((b) => b.type === this.buildMode.type) || BUILDING_CATALOG[0];
+      const cat = BUILDING_CATALOG.find((b) => b.type === this.buildMode.type) || { w: 4, d: 4, h: 3 };
       const hy = H(this.buildMode.hoverX, this.buildMode.hoverZ);
-      drawMesh("box", this.buildMode.hoverX, hy + 0.04, this.buildMode.hoverZ, 0, this.buildMode.rot, 0, cat.w, cat.h, cat.d, [0.2, 0.95, 0.55, 0.48], 0.4, MAT.DEFAULT, { castShadow: false });
+      this.ghostMat.color.setHex(0x33f28c);
+      this.ghostBox.position.set(this.buildMode.hoverX, hy + 0.04, this.buildMode.hoverZ);
+      this.ghostBox.rotation.y = this.buildMode.rot || 0;
+      this.ghostBox.scale.set(cat.w, cat.h, cat.d);
+      this.ghostBox.visible = true;
     }
 
-    // --- 10. Pluie 3D ---
-    if (rainMm > 0.5) {
-      const dropSpan = state.farm?.gridSize || 44;
-      const drops = Math.min(95, Math.round(rainMm * 6));
-      for (let i = 0; i < drops; i++) {
-        const px = ((i * 7.3) % dropSpan) - dropSpan / 2;
-        const pz = ((i * 11.7) % dropSpan) - dropSpan / 2;
-        const py = 12 - ((this.elapsed * 15 + i * 1.7) % 12);
-        drawMesh("box", px, py, pz, 0.08, 0, 0, 0.04, 0.72, 0.04, [0.58, 0.84, 1.0, 0.58], 0.2, MAT.DEFAULT, { castShadow: false });
+    const cssW = rect.width || this.canvas.width || 960;
+    const cssH = rect.height || this.canvas.height || 580;
+    this._syncThreeCamera(cssW / cssH);
+    this.renderer.render(this.scene, this.threeCamera);
+
+    this.hitBoxes = [...this.staticHitBoxes, ...dynamicHitBoxes];
+    this.arPins = [];
+    for (const dPin of [...this.cadastralPinDescs, ...this.staticArPinDescs, ...dynamicPins]) {
+      const pt = this._projectPoint(dPin.x, dPin.y, dPin.z, cssW, cssH);
+      if (pt && pt.x > 0 && pt.x < cssW && pt.y > 0 && pt.y < cssH) {
+        this.arPins.push({ id: dPin.id, label: dPin.label, x: pt.x, y: pt.y, warn: dPin.warn });
       }
     }
-
-    // --- Matrices de lumiere directionnelle (Shadow Pass) ---
-    const shadowUp = Math.hypot(sunDir[0], sunDir[2]) < 0.02 ? [0, 0, 1] : [0, 1, 0];
-    const lightView = mat4LookAt([sunDir[0] * 60, sunDir[1] * 60, sunDir[2] * 60], [0, 0, 0], shadowUp);
-    const lightProj = mat4Ortho(-34, 34, -34, 34, 2, 135);
-    const lightVP = mat4Mul(lightProj, lightView);
-    const shadowsActive = this.shadowsEnabled && this.shadowSupported && sun.elevationDeg > 3;
-
-    // --- PASSE 1 : Shadow Map ---
-    if (shadowsActive) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFbo);
-      gl.viewport(0, 0, this.shadowSize, this.shadowSize);
-      gl.clearColor(1, 1, 1, 1);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.disable(gl.BLEND);
-      gl.enable(gl.DEPTH_TEST);
-      gl.depthMask(true);
-      gl.enable(gl.POLYGON_OFFSET_FILL);
-      gl.polygonOffset(2.0, 4.0);
-
-      gl.useProgram(this.shadowProg);
-      gl.uniformMatrix4fv(this.shadowLocs.uLightVP, false, lightVP);
-      gl.uniform1f(this.shadowLocs.uTime, this.elapsed);
-
-      let lastBuf = null;
-      for (let i = 0; i < opaqueQueue.length; i++) {
-        const it = opaqueQueue[i];
-        if (!it.castShadow) continue;
-        if (lastBuf !== it.mesh.posBuf) {
-          gl.bindBuffer(gl.ARRAY_BUFFER, it.mesh.posBuf);
-          gl.vertexAttribPointer(this.shadowLocs.aPos, 3, gl.FLOAT, false, 0, 0);
-          gl.enableVertexAttribArray(this.shadowLocs.aPos);
-          lastBuf = it.mesh.posBuf;
-        }
-        gl.uniformMatrix4fv(this.shadowLocs.uModel, false, it.model);
-        gl.uniform1f(this.shadowLocs.uWindAmt, it.windAmt);
-        gl.drawArrays(gl.TRIANGLES, 0, it.mesh.count);
-      }
-
-      gl.disable(gl.POLYGON_OFFSET_FILL);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    }
-
-    // --- PASSE 2 : Dome Celeste + Scene Principale ---
-    gl.viewport(0, 0, targetW, targetH);
-    gl.clearColor(horizonColor[0], horizonColor[1], horizonColor[2], 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    // 2a. Sky Dome
-    gl.disable(gl.DEPTH_TEST);
-    gl.depthMask(false);
-    gl.disable(gl.BLEND);
-    gl.useProgram(this.skyProg);
-    const skyMesh = this.meshes.skyDome;
-    gl.bindBuffer(gl.ARRAY_BUFFER, skyMesh.posBuf);
-    gl.vertexAttribPointer(this.skyLocs.aPos, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(this.skyLocs.aPos);
-    gl.uniformMatrix4fv(this.skyLocs.uProj, false, proj);
-    gl.uniformMatrix4fv(this.skyLocs.uView, false, view);
-    gl.uniform3fv(this.skyLocs.uSunDir, new Float32Array(skySunDir));
-    gl.uniform1f(this.skyLocs.uSunInt, sun.intensity);
-    gl.uniform1f(this.skyLocs.uRain, rainAmt);
-    gl.uniform1f(this.skyLocs.uTime, this.elapsed);
-    gl.drawArrays(gl.TRIANGLES, 0, skyMesh.count);
-
-    // 2b. Opaque & Transparent Geometry
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthMask(true);
-    gl.useProgram(this.mainProg);
-    gl.uniformMatrix4fv(this.mainLocs.uProj, false, proj);
-    gl.uniformMatrix4fv(this.mainLocs.uView, false, view);
-    gl.uniformMatrix4fv(this.mainLocs.uLightVP, false, lightVP);
-    gl.uniform3fv(this.mainLocs.uEyePos, new Float32Array(eye));
-    gl.uniform3fv(this.mainLocs.uSunDir, new Float32Array(sunDir));
-    gl.uniform3fv(this.mainLocs.uSunColor, new Float32Array(sunColor));
-    gl.uniform1f(this.mainLocs.uSunInt, sun.isDay ? sun.intensity : 0.16);
-    gl.uniform3fv(this.mainLocs.uSkyColor, new Float32Array(skyColor));
-    gl.uniform3fv(this.mainLocs.uHorizonColor, new Float32Array(horizonColor));
-    gl.uniform1f(this.mainLocs.uTime, this.elapsed);
-    gl.uniform1f(this.mainLocs.uRain, rainAmt);
-    gl.uniform1f(this.mainLocs.uShadowsEnabled, shadowsActive ? 1.0 : 0.0);
-    gl.uniform1f(this.mainLocs.uShadowTexel, 1.0 / this.shadowSize);
-    gl.uniform1f(this.mainLocs.uShowContours, this.sculptMode.active ? 1.0 : 0.0);
-
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.shadowTex || null);
-    gl.uniform1i(this.mainLocs.uShadowMap, 0);
-
-    opaqueQueue.sort((a, b) => (a.meshName < b.meshName ? -1 : a.meshName > b.meshName ? 1 : 0));
-    transQueue.sort((a, b) => {
-      const da = Math.pow(a.model[12] - eye[0], 2) + Math.pow(a.model[13] - eye[1], 2) + Math.pow(a.model[14] - eye[2], 2);
-      const db = Math.pow(b.model[12] - eye[0], 2) + Math.pow(b.model[13] - eye[1], 2) + Math.pow(b.model[14] - eye[2], 2);
-      return db - da;
-    });
-
-    let boundMesh = null;
-    const drawMainList = (list) => {
-      for (let i = 0; i < list.length; i++) {
-        const it = list[i];
-        if (boundMesh !== it.mesh) {
-          gl.bindBuffer(gl.ARRAY_BUFFER, it.mesh.posBuf);
-          gl.vertexAttribPointer(this.mainLocs.aPos, 3, gl.FLOAT, false, 0, 0);
-          gl.enableVertexAttribArray(this.mainLocs.aPos);
-          gl.bindBuffer(gl.ARRAY_BUFFER, it.mesh.normBuf);
-          gl.vertexAttribPointer(this.mainLocs.aNorm, 3, gl.FLOAT, false, 0, 0);
-          gl.enableVertexAttribArray(this.mainLocs.aNorm);
-          boundMesh = it.mesh;
-        }
-        gl.uniformMatrix4fv(this.mainLocs.uModel, false, it.model);
-        gl.uniformMatrix3fv(this.mainLocs.uNormalMat, false, mat3NormalFromMat4(it.model, this._normMatBuf));
-        gl.uniform4fv(this.mainLocs.uColor, new Float32Array(it.rgba));
-        gl.uniform1f(this.mainLocs.uEmissive, it.emissive);
-        gl.uniform1f(this.mainLocs.uMatType, it.matType);
-        gl.uniform1f(this.mainLocs.uWindAmt, it.windAmt);
-        gl.drawArrays(gl.TRIANGLES, 0, it.mesh.count);
-      }
-    };
-
-    gl.disable(gl.BLEND);
-    gl.depthMask(true);
-    drawMainList(opaqueQueue);
-
-    gl.enable(gl.BLEND);
-    gl.depthMask(false);
-    drawMainList(transQueue);
-    gl.depthMask(true);
 
     return this.arPins;
   }
 
-  _render2DFallback(state) {
-    const ctx = this.ctx2d;
-    const w = this.canvas.width, h = this.canvas.height;
-    ctx.fillStyle = "#10211c";
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = "#93c5fd";
-    ctx.font = "14px sans-serif";
-    ctx.fillText(`Vue 2D Repli — ${state.farm.name} (${state.plots.length} planches)`, 24, 34);
+  /**
+   * Rend un cliché haute résolution (QHD / 4K) avec ombres complètes sans perturber l'UI.
+   */
+  exportPhotoRender({ width = 2560, height = 1440 } = {}) {
+    if (!this.renderer || !this.threeCamera) return null;
+    const gl = this.gl;
+    const maxDims = gl ? gl.getParameter(gl.MAX_VIEWPORT_DIMS) : [4096, 4096];
+    const w = Math.min(width, maxDims?.[0] || 4096);
+    const h = Math.min(height, maxDims?.[1] || 4096);
+
+    const prevW = this.canvas.width;
+    const prevH = this.canvas.height;
+    const prevPixelRatio = this.renderer.getPixelRatio();
+    const prevAspect = this.threeCamera.aspect;
+
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(w, h, false);
+    this._syncThreeCamera(w / h);
+    this.renderer.shadowMap.needsUpdate = true;
+    this.renderer.render(this.scene, this.threeCamera);
+    const dataUrl = this.canvas.toDataURL("image/png");
+
+    this.renderer.setPixelRatio(prevPixelRatio);
+    this.renderer.setSize(Math.max(1, Math.round(prevW / prevPixelRatio)), Math.max(1, Math.round(prevH / prevPixelRatio)), false);
+    this.threeCamera.aspect = prevAspect;
+    this.threeCamera.updateProjectionMatrix();
+    this.renderer.render(this.scene, this.threeCamera);
+
+    return dataUrl;
   }
 }
