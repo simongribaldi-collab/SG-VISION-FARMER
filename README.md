@@ -4,10 +4,11 @@
 
 ## Fonctionnalités clés
 
-- **Jumeau Numérique 3D Temps Réel (WebGL natif, zéro dépendance)** :
-  - Construisez, déplacez, pivotez et personnalisez votre ferme en 3D (planches de culture, serres avec ouvrants animés, poulaillers fixes/mobiles, bâtiments d'élevage, paddocks, hangars, cuves/bassins, panneaux solaires, éoliennes, station météo, haies agroforestières, ruchers, compost).
-  - Visualisez les **robots autonomes en mouvement** (rover désherbeur, drone NDVI, tracteur RTK, distributeur) et **6 calques d'analyse** (Normal, Humidité sol, Santé NDVI, Risque Maladies, Flux Énergie/Eau, Overlay AR).
-  - **Soleil & Saisons dynamiques** : observez les ombres portées heure par heure.
+- **Jumeau Numérique 3D Réaliste Temps Réel (WebGL natif, zéro dépendance)** :
+  - **Rendu V3 haute fidélité** : ombres portées douces (PCF 3×3), dôme céleste atmosphérique avec nuages FBM & étoiles, collines lointaines continues jusqu'à l'horizon, eau animée avec reflets Fresnel, pierre de taille calcaire, tuiles terre cuite, bois, terre travaillée, feuillage translucide au soleil et correction tonale ACES.
+  - Construisez, déplacez, pivotez, sculptez le dénivelé et personnalisez votre ferme en 3D (corps de ferme en U, granges, boutique, silos, planches de culture, serres tunnel avec arceaux ou serres verre Venlo avec ouvrants animés, poulaillers fixes/mobiles, bâtiments d'élevage, paddocks clôturés, rivières, ponts, cuves/bassins, panneaux solaires, éoliennes, station météo, haies agroforestières, ruchers, compost).
+  - Visualisez les **robots autonomes en mouvement** (rover désherbeur, drone NDVI, tracteur RTK) et **6 calques d'analyse** (Réel HD, Humidité sol, Santé NDVI, Risque Maladies, Flux Énergie/Eau, Balises AR).
+  - **Soleil & Saisons dynamiques** : observez la lumière, le ciel et les ombres portées heure par heure.
 - **Time-Machine & Simulateur « Prévoir l'avenir »** :
   - Cursez de **Aujourd'hui jusqu'à +365 jours** (avec mode **Time-Lapse 3D**) et testez des scénarios *What-If* (canicule, sécheresse, gel tardif, flambée énergie, extension serre).
   - Calculs prédictifs : degrés-jours (GDD), bilan hydrique & ETP, indices maladies (mildiou, oïdium, pou rouge), courbes de récolte & ponte, charge humaine vs robotique, dates de rupture de stock et trésorerie 12 mois.

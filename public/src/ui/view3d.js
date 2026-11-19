@@ -1,4 +1,4 @@
-import { BUILDING_CATALOG, CROP_CATALOG, generateTerrainHeights, TERRAIN_PRESETS } from "../data/presets.js";
+import { ANIMAL_SPECIES, BUILDING_CATALOG, CROP_CATALOG, generateTerrainHeights, TERRAIN_PRESETS } from "../data/presets.js";
 import { dispatchRobot, setGreenhouseVent, toggleCoopDoor, toggleIrrigation } from "../engine/automation.js";
 import { getTerrainHeight } from "../engine/engine3d.js";
 import { evaluateRotation, getCropById } from "../engine/predictor.js";
@@ -21,13 +21,22 @@ const OVERLAYS = [
 ];
 
 const BUILD_CATEGORIES = [
-  { id: "all", label: "Tout (26)" },
+  { id: "all", label: `Tout (${BUILDING_CATALOG.length})` },
   { id: "corps_ferme", label: "🏰 Corps de Ferme" },
   { id: "paysage", label: "🏞️ Haies, Chemins & Rivière" },
   { id: "culture", label: "🌱 Cultures & Serres" },
   { id: "elevage", label: "🐄 Élevage & Ponte" },
   { id: "energie", label: "⚡ Eau, Énergie & Tech" },
 ];
+
+export function filterBuildingCatalog(buildCat = "all") {
+  return BUILDING_CATALOG.filter((b) => {
+    if (buildCat === "all") return true;
+    if (buildCat === "elevage") return b.category === "elevage" || b.category === "ponte";
+    if (buildCat === "energie") return ["ressource", "energie", "capteur", "infra", "agro"].includes(b.category);
+    return b.category === buildCat;
+  });
+}
 
 const SCULPT_TOOLS = [
   { id: "raise", label: "🔼 Élever colline" },
@@ -55,12 +64,7 @@ export function renderView3D(container, ctx) {
   const sel = uiState.selectedObject;
   const buildCat = uiState.buildCategory || "all";
 
-  const filteredCatalog = BUILDING_CATALOG.filter((b) => {
-    if (buildCat === "all") return true;
-    if (buildCat === "elevage") return b.cat === "elevage" || b.cat === "ponte";
-    if (buildCat === "energie") return ["ressource", "energie", "capteur", "infra", "agro"].includes(b.cat);
-    return b.cat === buildCat;
-  });
+  const filteredCatalog = filterBuildingCatalog(buildCat);
 
   container.innerHTML = `
     <div class="grid-cockpit">
@@ -77,8 +81,10 @@ export function renderView3D(container, ctx) {
             </div>
             <div class="hud-chip-bar">
               <button class="btn btn-sm" data-cam="iso">📐 Iso</button>
+              <button class="btn btn-sm" data-cam="farmhouse">🏡 Ferme</button>
               <button class="btn btn-sm" data-cam="top">🗺️ Plan</button>
               <button class="btn btn-sm" data-cam="ar">🥽 Vue AR</button>
+              <button class="btn btn-sm ${uiState.shadowsEnabled !== false ? "active" : ""}" id="btn-toggle-shadows">☀️ Ombres HD</button>
               <button class="btn btn-sm ${uiState.showArPins ? "active" : ""}" id="btn-toggle-pins">🏷️ Étiquettes</button>
               <button class="btn btn-sm ${uiState.scannerOpen ? "btn-amber" : "btn-primary"}" id="btn-open-scanner">🎥 Filmer / Scanner la Ferme</button>
             </div>
@@ -90,7 +96,7 @@ export function renderView3D(container, ctx) {
               <div style="flex:1;">
                 <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:2px;">
                   <span>🔮 <strong>Prévoir l'avenir</strong> : <span id="lbl-day-offset">${state.simulation.dayOffset === 0 ? "Aujourd'hui (Direct)" : `J+${state.simulation.dayOffset}`}</span></span>
-                  <span class="muted">${esc(forecast.daily[Math.min(state.simulation.dayOffset, forecast.daily.length - 1)]?.date || "")}</span>
+                  <span class="muted" id="lbl-day-date">${esc(forecast.daily[Math.min(state.simulation.dayOffset, forecast.daily.length - 1)]?.date || "")}</span>
                 </div>
                 <input type="range" id="slider-day" min="0" max="90" value="${state.simulation.dayOffset}" style="width:100%;accent-color:#22c55e;"/>
               </div>
@@ -230,6 +236,7 @@ export function renderView3D(container, ctx) {
 
   if (ctx.engine3d) {
     ctx.engine3d.overlay = uiState.overlay;
+    ctx.engine3d.shadowsEnabled = uiState.shadowsEnabled !== false;
     ctx.engine3d.buildMode.active = Boolean(uiState.buildActive && !uiState.sculptActive);
     ctx.engine3d.buildMode.type = uiState.buildType;
     ctx.engine3d.buildMode.rot = uiState.buildRot;
@@ -254,6 +261,12 @@ export function renderView3D(container, ctx) {
     });
   });
 
+  container.querySelector("#btn-toggle-shadows")?.addEventListener("click", () => {
+    uiState.shadowsEnabled = uiState.shadowsEnabled === false;
+    if (ctx.engine3d) ctx.engine3d.shadowsEnabled = uiState.shadowsEnabled;
+    ctx.rerender();
+  });
+
   container.querySelector("#btn-toggle-pins").addEventListener("click", () => {
     uiState.showArPins = !uiState.showArPins;
     ctx.rerender();
@@ -273,6 +286,12 @@ export function renderView3D(container, ctx) {
     const lbl = container.querySelector("#lbl-day-offset");
     if (lbl) lbl.textContent = state.simulation.dayOffset === 0 ? "Aujourd'hui (Direct)" : `J+${state.simulation.dayOffset}`;
     ctx.refreshForecastOnly();
+    ctx.updateStatusRibbon?.();
+    const dateLbl = container.querySelector("#lbl-day-date");
+    if (dateLbl && ctx.forecast?.daily) {
+      const dSnap = ctx.forecast.daily[Math.min(state.simulation.dayOffset, ctx.forecast.daily.length - 1)];
+      if (dSnap) dateLbl.textContent = dSnap.date;
+    }
   });
   daySlider.addEventListener("change", () => ctx.save());
 
@@ -317,6 +336,8 @@ export function renderView3D(container, ctx) {
     btn.addEventListener("click", () => {
       const presetId = btn.dataset.terrainPreset;
       state.terrain = generateTerrainHeights(presetId, 32);
+      state.terrain._dirty = true;
+      state.terrain._version = Date.now();
       ctx.toast(`Relief 3D appliqué : ${presetId}`);
       ctx.save();
       ctx.rerender();
@@ -328,6 +349,8 @@ export function renderView3D(container, ctx) {
     ctx.toast(`🛰️ Récupération du relief NGF réel autour de ${name} (${lat.toFixed(3)}, ${lon.toFixed(3)})...`);
     const res = await fetchRealTopography(lat, lon, 32);
     state.terrain = res.terrain;
+    state.terrain._dirty = true;
+    state.terrain._version = Date.now();
     ctx.toast(
       `⛰️ Relief appliqué : altitude ${res.minElevationM}m → ${res.maxElevationM}m (Δ ${res.deltaM}m)${res.ok ? " [Open-Meteo DEM]" : " [Modèle Coteau local]"}`
     );
@@ -619,7 +642,7 @@ function renderInspector(sel, state, forecast) {
     const p = state.plots.find((x) => x.id === sel.id) || sel.data;
     const snap = forecast.plotSnapshots.find((s) => s.id === p.id);
     const crop = getCropById(p.cropId);
-    const rotEval = evaluateRotation(p, p.cropId);
+    const rotEval = evaluateRotation(p, p.cropId, { includeCurrent: false });
     const isGh = p.zone === "Serre";
     const elevM = getTerrainHeight(state, p.x, p.z).toFixed(1);
 
@@ -671,6 +694,27 @@ function renderInspector(sel, state, forecast) {
     `;
   }
 
+  if (sel.kind === "livestock") {
+    const l = state.livestock.find((x) => x.id === sel.id) || sel.data;
+    const sp = ANIMAL_SPECIES.find((s) => s.id === l.speciesId) || ANIMAL_SPECIES[0];
+    const isPonte = l.kind === "ponte";
+    return `
+      <div class="card-header">
+        <h3 class="card-title">${sp.icon} ${esc(l.name)}</h3>
+        ${pill(`${l.count} ${isPonte ? "sujets" : "têtes"}`, "ok")}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div class="muted">Espèce : <strong>${esc(sp.label)}</strong> · Parcours : <strong>${esc(l.paddockName)}</strong></div>
+        ${isPonte ? `<div>🥚 Ponte du jour : <strong>${l.eggsToday || Math.round((l.count * l.layingRatePct) / 100)} œufs</strong> (${l.layingRatePct}%) · Trappe : <strong>${l.doorOpen ? "Ouverte" : "Fermée"}</strong></div>` : `<div>💧 Eau : <strong>${Math.round(l.count * (l.waterLitersPerDay || sp.defaultWaterL))} L/j</strong> · Ration : <strong>${Math.round((l.count * (l.feedGramsPerDay || sp.defaultFeedG)) / 1000)} kg/j</strong></div>`}
+        <div>💚 Bien-être : <strong>${l.welfarePct}%</strong></div>
+        ${progressBar(l.welfarePct, "#22c55e")}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+          ${isPonte ? `<button class="btn btn-primary btn-sm" data-insp-lot-door="${l.id}">🚪 ${l.doorOpen ? "Fermer trappe" : "Ouvrir trappe"}</button>` : `<button class="btn btn-primary btn-sm" data-insp-lot-pad="${l.id}">🔄 Changer Paddock</button>`}
+        </div>
+      </div>
+    `;
+  }
+
   if (sel.kind === "robot") {
     const b = state.equipment.find((x) => x.id === sel.id) || sel.data;
     return `
@@ -697,8 +741,16 @@ function bindInspectorEvents(insp, ctx) {
     cropSel.addEventListener("change", () => {
       const p = state.plots.find((x) => x.id === cropSel.dataset.plotId);
       if (p) {
+        const oldCrop = getCropById(p.cropId);
+        const oldRatio = oldCrop?.gddTarget ? (p.gddAccumulated || 0) / oldCrop.gddTarget : 0.55;
+        const prevN1 = (p.history || []).find((h) => h.season === "N-1");
+        p.history = [
+          ...(prevN1 ? [{ season: "N-2", cropId: prevN1.cropId }] : []),
+          { season: "N-1", cropId: p.cropId },
+        ];
         p.cropId = cropSel.value;
         const c = getCropById(p.cropId);
+        p.gddAccumulated = Math.round(c.gddTarget * Math.max(0.55, Math.min(0.95, oldRatio)));
         ctx.toast(`Culture 3D changée en ${c.icon} ${c.name} sur ${p.id}`);
         ctx.save();
         ctx.rerender();
@@ -726,8 +778,31 @@ function bindInspectorEvents(insp, ctx) {
 
   insp.querySelectorAll("[data-insp-coop]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const res = toggleCoopDoor(state);
+      const res = toggleCoopDoor(state, null, null, btn.dataset.inspCoop);
       ctx.toast(res.message);
+      ctx.save();
+      ctx.rerender();
+    });
+  });
+
+  insp.querySelectorAll("[data-insp-lot-door]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const res = toggleCoopDoor(state, btn.dataset.inspLotDoor);
+      ctx.toast(res.message);
+      ctx.save();
+      ctx.rerender();
+    });
+  });
+
+  insp.querySelectorAll("[data-insp-lot-pad]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const lot = state.livestock.find((x) => x.id === btn.dataset.inspLotPad);
+      if (!lot) return;
+      const paddocks = ["Paddock A (Nord)", "Paddock B (Sous-bois)", "Paddock C (Prairie Est)", "Paddock D (Luzerne)"];
+      const idx = paddocks.indexOf(lot.paddockName);
+      lot.paddockName = paddocks[(idx + 1) % paddocks.length];
+      lot.welfarePct = Math.min(100, (lot.welfarePct || 90) + 2);
+      ctx.toast(`Troupeau déplacé vers ${lot.paddockName}`);
       ctx.save();
       ctx.rerender();
     });
@@ -754,7 +829,13 @@ function bindInspectorEvents(insp, ctx) {
 
   insp.querySelectorAll("[data-insp-del-plot]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.plots = state.plots.filter((x) => x.id !== btn.dataset.inspDelPlot);
+      const plotId = btn.dataset.inspDelPlot;
+      state.plots = state.plots.filter((x) => x.id !== plotId);
+      state.equipment.forEach((eq) => {
+        if (eq.autonomous && eq.targetPlotId === plotId) {
+          dispatchRobot(state, eq.id, null);
+        }
+      });
       uiState.selectedObject = null;
       ctx.toast("Planche supprimée.");
       ctx.save();

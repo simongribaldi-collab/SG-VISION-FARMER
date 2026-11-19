@@ -1,4 +1,4 @@
-param([int]$Port = 18766)
+﻿param([int]$Port = 18766)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -13,7 +13,10 @@ Write-Host "[PASS] server.ps1 PowerShell syntax OK"
 
 $logOut = Join-Path $Root "tools\srv.out.log"
 $logErr = Join-Path $Root "tools\srv.err.log"
-$proc = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ServerScript, "-Port", "$Port") -PassThru -WindowStyle Hidden -RedirectStandardOutput $logOut -RedirectStandardError $logErr
+$testDataDir = Join-Path $env:TEMP "sg-farmer-test-data"
+if (Test-Path $testDataDir) { Remove-Item $testDataDir -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Path $testDataDir -Force | Out-Null
+$proc = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ServerScript, "-Port", "$Port", "-DataDir", $testDataDir) -PassThru -WindowStyle Hidden -RedirectStandardOutput $logOut -RedirectStandardError $logErr
 Start-Sleep -Seconds 3
 
 try {
@@ -71,14 +74,15 @@ try {
     if (-not $tel.ok) { throw "Telemetry webhook failed" }
     Write-Host "[PASS] POST /api/telemetry -> stored=$($tel.stored)"
 
-    Remove-Item (Join-Path $Root "data\farm-state.json") -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $testDataDir "farm-state.json") -ErrorAction SilentlyContinue
     $edgePath = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
     if (Test-Path $edgePath) {
         $tmpProf = Join-Path $env:TEMP "sg-farmer-edge-test"
         $domOut = Join-Path $Root "tools\edge-dom.tmp.html"
         $gDomOut = Join-Path $Root "tools\edge-gdom.tmp.html"
         if (Test-Path $tmpProf) { Remove-Item $tmpProf -Recurse -Force -ErrorAction SilentlyContinue }
-        $eProc = Start-Process -FilePath $edgePath -ArgumentList @("--headless=new", "--no-sandbox", "--disable-gpu", "--user-data-dir=`"$tmpProf`"", "--virtual-time-budget=4000", "--dump-dom", "`"$baseUrl/`"") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $domOut -RedirectStandardError (Join-Path $Root "tools\edge-err.tmp.log")
+        $edgeWebGlArgs = @("--headless=new", "--no-sandbox", "--enable-webgl", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--user-data-dir=`"$tmpProf`"")
+        $eProc = Start-Process -FilePath $edgePath -ArgumentList ($edgeWebGlArgs + @("--virtual-time-budget=4500", "--dump-dom", "`"$baseUrl/`"")) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $domOut -RedirectStandardError (Join-Path $Root "tools\edge-err.tmp.log")
         $dom = if (Test-Path $domOut) { Get-Content $domOut -Raw -Encoding UTF8 } else { "" }
         if ($dom -match "Domaine Val-Soleil" -and $dom -match "farm-canvas") {
             Write-Host "[PASS] Headless Edge rendered SG Vision Farmer + 3D canvas + initial state!"
@@ -87,7 +91,7 @@ try {
             throw "Headless Edge did not render expected farm UI (code=$($eProc.ExitCode), len=$($dom.Length)): $errEdge"
         }
 
-        $gProc = Start-Process -FilePath $edgePath -ArgumentList @("--headless=new", "--no-sandbox", "--disable-gpu", "--user-data-dir=`"$tmpProf`"", "--virtual-time-budget=3000", "--dump-dom", "`"$baseUrl/glasses.html`"") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $gDomOut -RedirectStandardError (Join-Path $Root "tools\edge-gerr.tmp.log")
+        $gProc = Start-Process -FilePath $edgePath -ArgumentList ($edgeWebGlArgs + @("--virtual-time-budget=3500", "--dump-dom", "`"$baseUrl/glasses.html`"")) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $gDomOut -RedirectStandardError (Join-Path $Root "tools\edge-gerr.tmp.log")
         $gDom = if (Test-Path $gDomOut) { Get-Content $gDomOut -Raw -Encoding UTF8 } else { "" }
         if ($gDom -match "HUD LUNETTES AR" -and $gDom -match "Autonomie Globale") {
             Write-Host "[PASS] Headless Edge rendered Smart Glasses AR HUD (/glasses.html)!"
@@ -95,7 +99,7 @@ try {
             throw "Headless Edge did not render glasses HUD (code=$($gProc.ExitCode), len=$($gDom.Length))"
         }
 
-        # Deep unit + all-7-views render test inside Edge
+        # Deep unit + V3 WebGL shader/FBO + all-7-views coherence test inside Edge
         $verifyHtmlPath = Join-Path $Root "public\_verify_tmp.html"
         $verifyDomOut = Join-Path $Root "tools\edge-vdom.tmp.html"
         @'
@@ -108,7 +112,7 @@ import { processNaturalCommand } from "/src/engine/aiAssistant.js";
 import { injectWeatherEvent } from "/src/engine/weather.js";
 import { getTerrainHeight, sculptTerrainAt, Farm3DEngine } from "/src/engine/engine3d.js";
 import { drawDemoVideoScanFrame, analyzeFrameToFarmLayout, applyScanToFarmState } from "/src/engine/scanner3d.js";
-import { renderView3D } from "/src/ui/view3d.js";
+import { filterBuildingCatalog, renderView3D } from "/src/ui/view3d.js";
 import { renderViewAgronomy } from "/src/ui/viewAgronomy.js";
 import { renderViewLivestock } from "/src/ui/viewLivestock.js";
 import { renderViewRobotics } from "/src/ui/viewRobotics.js";
@@ -118,15 +122,38 @@ import { renderViewEcosystem } from "/src/ui/viewEcosystem.js";
 
 const out = document.getElementById("res");
 try {
-  if (BUILDING_CATALOG.length < 24 || ANIMAL_SPECIES.length < 8 || TERRAIN_PRESETS.length < 4) {
-    throw new Error("V2 catalog sizes invalid");
+  if (BUILDING_CATALOG.length < 28 || ANIMAL_SPECIES.length < 8 || TERRAIN_PRESETS.length < 4) {
+    throw new Error("V3 catalog sizes invalid");
   }
+  for (const b of BUILDING_CATALOG) {
+    if (!b.category) throw new Error("Missing category on building: " + b.type);
+  }
+  for (const cat of ["all", "corps_ferme", "paysage", "culture", "elevage", "energie"]) {
+    if (filterBuildingCatalog(cat).length === 0) throw new Error("Empty build category filter: " + cat);
+  }
+
   for (const p of SCALE_PRESETS) {
     const s = buildPresetState(p.id);
-    const sim = simulateFuture(s, 90, "heatwave");
+    if (s.version !== 3) throw new Error("Preset version must be 3 for " + p.id);
+    const sim = simulateFuture(s, 90, "heatwave", 0);
     if (!sim.daily || sim.daily.length !== 91) throw new Error("Bad horizon for " + p.id);
   }
+
   const st = buildPresetState("polyculture");
+  const fc0 = simulateFuture(st, 60, "normal", 0);
+  const fc45 = simulateFuture(st, 60, "normal", 45);
+  const p0 = fc0.plotSnapshots.find((x) => x.id === "P1");
+  const p45 = fc45.plotSnapshots.find((x) => x.id === "P1");
+  if (!p0 || !p45 || !(p45.progressPct > p0.progressPct)) {
+    throw new Error("Time-Machine plotSnapshots did not advance between J+0 and J+45");
+  }
+
+  const rotCurrent = evaluateRotation(st.plots[0], st.plots[0].cropId, { includeCurrent: false });
+  const rotRepeat = evaluateRotation(st.plots[0], st.plots[0].cropId, { includeCurrent: true });
+  if (!(rotCurrent.score >= 70 && rotRepeat.score < 60)) {
+    throw new Error("Rotation evaluation failed: current=" + rotCurrent.score + ", repeat=" + rotRepeat.score);
+  }
+
   const hBefore = getTerrainHeight(st, 0, 0);
   sculptTerrainAt(st, 0, 0, "raise", 6, 0.8);
   const hAfter = getTerrainHeight(st, 0, 0);
@@ -138,27 +165,63 @@ try {
   drawDemoVideoScanFrame(scanCanvas.getContext("2d"), 520, 280, "coteau_ferme", 1.2);
   const scanRes = analyzeFrameToFarmLayout(scanCanvas);
   if (!scanRes.detections || scanRes.detections.length < 4) throw new Error("Scanner failed to detect farm zones");
-  const stScan = buildPresetState("micro_urbaine");
+  const stScan = buildPresetState("micro");
   applyScanToFarmState(stScan, scanRes);
   if (stScan.structures.length < 4) throw new Error("applyScanToFarmState did not populate 3D structures");
 
-  const rot = evaluateRotation(st.plots[0], "tomate");
-  if (typeof rot.score !== "number") throw new Error("Rotation score invalid");
+  // Test glassesHud STORAGE_KEY synchronization
+  const ghSrc = await (await fetch("/src/ui/glassesHud.js")).text();
+  if (!ghSrc.includes("sg_vision_farmer_state_v2")) {
+    throw new Error("glassesHud.js must use sg_vision_farmer_state_v2");
+  }
+
   injectWeatherEvent(st, "storm");
   const autos = evaluateAutomations(st);
   if (autos.length < 1) throw new Error("Expected storm automation trigger");
-  const ai1 = processNaturalCommand(st, "Envoie le rover sur P2", simulateFuture(st, 30, "normal"));
-  if (!ai1.mutated) throw new Error("Expected AI command mutation");
+
+  const cashBeforeAi = st.finances.cashBalance;
+  const ai1 = processNaturalCommand(st, "Envoie le rover sur P2", fc0);
+  const ai2 = processNaturalCommand(st, "Note 10 kg tomates sur S1", fc0);
+  if (!ai1.mutated || !ai2.mutated || !(st.finances.cashBalance > cashBeforeAi)) {
+    throw new Error("Expected AI command mutations and cashBalance update");
+  }
+
+  // Test WebGL V3 engine: 3 shader programs, Shadow FBO, all presets, lighting times, rain & 6 overlays
   const mount = document.getElementById("mount");
-  const fc = simulateFuture(st, 60, "normal");
+  const testCanvas = document.createElement("canvas");
+  testCanvas.width = 640; testCanvas.height = 400;
+  document.body.appendChild(testCanvas);
+  const eng = new Farm3DEngine(testCanvas, {});
+  if (!eng.gl) throw new Error("WebGL context not available in headless Edge");
+  if (!eng.shadowSupported) throw new Error("Shadow FBO not supported in headless Edge");
+  for (const preset of SCALE_PRESETS) {
+    const ps = buildPresetState(preset.id);
+    const pfc = simulateFuture(ps, 14, "normal", 0);
+    for (const h of [10.5, 18.5, 23.0]) {
+      ps.simulation.hourOfDay = h;
+      ps.weather.current.rainMm = h === 18.5 ? 12 : 0;
+      eng.render(ps, pfc, 0.016);
+    }
+  }
+  for (const ov of ["normal", "moisture", "health", "disease", "energy", "ar"]) {
+    eng.overlay = ov;
+    eng.render(st, fc0, 0.016);
+  }
+  const glErr = eng.gl.getError();
+  if (glErr !== 0) throw new Error("WebGL error detected: " + glErr);
+  eng.destroy();
+
+  // Test all 7 views + livestock/resources/agronomy cash coherence
   const ctx = {
-    state: st, forecast: fc,
-    uiState: { overlay: "normal", showArPins: false, buildActive: false, buildCategory: "all", buildType: "bed_open", buildRot: 0, sculptActive: true, sculptTool: "raise", sculptRadius: 5, scannerOpen: true, demoScanId: "coteau_ferme", selectedObject: null, agroTab: "plots", forecastHorizon: 60 },
+    state: st, forecast: fc0,
+    uiState: { overlay: "normal", showArPins: false, shadowsEnabled: true, buildActive: false, buildCategory: "all", buildType: "bed_open", buildRot: 0, sculptActive: true, sculptTool: "raise", sculptRadius: 5, scannerOpen: true, demoScanId: "coteau_ferme", selectedObject: null, agroTab: "plots", forecastHorizon: 60 },
     engine3d: null, serverStatus: { online: true, mcpTools: 6 },
-    save: () => {}, rerender: () => {}, refreshForecastOnly: () => {}, replaceState: () => {}, toast: () => {}, mountCanvas: (c) => {
+    save: () => {}, rerender: () => {}, refreshForecastOnly: () => {}, updateStatusRibbon: () => {}, replaceState: () => {}, toast: () => {},
+    mountCanvas: (c) => {
       if (c) {
-        const eng = new Farm3DEngine(c, {});
-        eng.render(st, fc, 0.016);
+        const viewEng = new Farm3DEngine(c, {});
+        viewEng.render(st, fc0, 0.016);
+        viewEng.destroy();
       }
     }
   };
@@ -167,25 +230,49 @@ try {
     ctx.uiState.agroTab = tab;
     renderViewAgronomy(mount, ctx);
   }
+
+  // Test livestock form numeric values & egg collection cash update
   renderViewLivestock(mount, ctx);
-  renderViewRobotics(mount, ctx);
+  const lForm = mount.querySelector("#form-add-livestock");
+  lForm.querySelector('[name="name"]').value = "Lot Chèvres Test";
+  lForm.querySelector('[name="speciesId"]').value = "caprin";
+  lForm.querySelector('[name="count"]').value = "12";
+  lForm.dispatchEvent(new Event("submit", { cancelable: true }));
+  const addedLot = st.livestock[st.livestock.length - 1];
+  if (!Number.isFinite(addedLot.feedGramsPerDay) || !Number.isFinite(addedLot.waterLitersPerDay)) {
+    throw new Error("Added livestock lot has NaN feed/water");
+  }
+  const cashBeforeEgg = st.finances.cashBalance;
+  mount.querySelector("[data-collect-eggs]")?.click();
+  if (!(st.finances.cashBalance > cashBeforeEgg)) {
+    throw new Error("Egg collection did not update cashBalance");
+  }
+
+  // Test resource restock cash update
   renderViewResources(mount, ctx);
+  const cashBeforeRestock = st.finances.cashBalance;
+  mount.querySelector("[data-restock-id]")?.click();
+  if (!(st.finances.cashBalance < cashBeforeRestock)) {
+    throw new Error("Resource restock did not debit cashBalance");
+  }
+
+  renderViewRobotics(mount, ctx);
   renderViewForecastFinance(mount, ctx);
   renderViewEcosystem(mount, ctx);
-  out.textContent = "ALL_7_VIEWS_AND_ENGINES_PASS";
+  out.textContent = "ALL_7_VIEWS_AND_V3_ENGINES_PASS";
 } catch (err) {
   out.textContent = "FAIL: " + (err && err.stack ? err.stack : err);
 }
 </script></body></html>
 '@ | Set-Content -Path $verifyHtmlPath -Encoding UTF8
 
-        $vProc = Start-Process -FilePath $edgePath -ArgumentList @("--headless=new", "--no-sandbox", "--disable-gpu", "--user-data-dir=`"$tmpProf`"", "--virtual-time-budget=3000", "--dump-dom", "`"$baseUrl/_verify_tmp.html`"") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $verifyDomOut -RedirectStandardError (Join-Path $Root "tools\edge-verr.tmp.log")
+        $vProc = Start-Process -FilePath $edgePath -ArgumentList ($edgeWebGlArgs + @("--virtual-time-budget=5000", "--dump-dom", "`"$baseUrl/_verify_tmp.html`"")) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $verifyDomOut -RedirectStandardError (Join-Path $Root "tools\edge-verr.tmp.log")
         $vDom = if (Test-Path $verifyDomOut) { Get-Content $verifyDomOut -Raw -Encoding UTF8 } else { "" }
         Remove-Item $verifyHtmlPath, $verifyDomOut, (Join-Path $Root "tools\edge-verr.tmp.log") -ErrorAction SilentlyContinue
-        if ($vDom -match "ALL_7_VIEWS_AND_ENGINES_PASS") {
-            Write-Host "[PASS] Deep JS/UI Verification: all 5 scale presets, 365/90d predictor, rotation, storm automations, AI command & all 7 views rendered without error!"
+        if ($vDom -match "ALL_7_VIEWS_AND_V3_ENGINES_PASS") {
+            Write-Host "[PASS] Deep JS/WebGL V3 Verification: shaders, shadow FBO, all 5 scale presets, Time-Machine, rotations, livestock, finances, AI & all 7 views passed!"
         } else {
-            throw "Deep JS/UI Verification failed: $vDom"
+            throw "Deep JS/WebGL V3 Verification failed: $vDom"
         }
 
         Remove-Item $domOut, $gDomOut, (Join-Path $Root "tools\edge-err.tmp.log"), (Join-Path $Root "tools\edge-gerr.tmp.log") -ErrorAction SilentlyContinue
@@ -200,8 +287,5 @@ try {
     }
     Remove-Item $logOut -ErrorAction SilentlyContinue
     Remove-Item $logErr -ErrorAction SilentlyContinue
-    $dataDir = Join-Path $Root "data"
-    Remove-Item (Join-Path $dataDir "farm-state.json") -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $dataDir "hud-state.json") -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $dataDir "telemetry-log.json") -ErrorAction SilentlyContinue
+    Remove-Item $testDataDir -Recurse -Force -ErrorAction SilentlyContinue
 }

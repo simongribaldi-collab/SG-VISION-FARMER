@@ -316,6 +316,8 @@ export function analyzeFrameToFarmLayout(canvas) {
 export function applyScanToFarmState(state, scanResult) {
   if (!scanResult || !scanResult.detections) return;
   state.terrain = generateTerrainHeights(scanResult.terrainPreset || "valley_river", 32);
+  state.terrain._dirty = true;
+  state.terrain._version = Date.now();
 
   const newPlots = [];
   const newStructures = [
@@ -469,4 +471,23 @@ export function applyScanToFarmState(state, scanResult) {
 
   if (newPlots.length > 0) state.plots = newPlots;
   if (newStructures.length > 2) state.structures = newStructures;
+
+  // Reaffecte les robots autonomes dont la parcelle cible a ete remplacee
+  const plotIds = new Set((state.plots || []).map((p) => p.id));
+  for (const eq of state.equipment || []) {
+    if (!eq.autonomous) continue;
+    if (eq.targetPlotId && !plotIds.has(eq.targetPlotId)) {
+      const nextPlot = state.plots[0];
+      if (nextPlot) {
+        eq.targetPlotId = nextPlot.id;
+        eq.targetX = nextPlot.x;
+        eq.targetZ = nextPlot.z;
+        eq.task = `${eq.kind === "drone" ? "Scan NDVI" : "Intervention"} sur ${nextPlot.name}`;
+      } else {
+        eq.status = "idle";
+        eq.targetPlotId = null;
+        eq.task = "En attente de mission";
+      }
+    }
+  }
 }

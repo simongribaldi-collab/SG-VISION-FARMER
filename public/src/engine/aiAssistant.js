@@ -83,6 +83,18 @@ export function processNaturalCommand(state, rawText, forecastSnapshot) {
       unit,
       valueEur,
     });
+    if (state.finances) {
+      state.finances.ledger = state.finances.ledger || [];
+      state.finances.ledger.unshift({
+        id: `TX-${Date.now()}`,
+        date: new Date().toISOString().slice(0, 10),
+        type: "recette",
+        atelier: unit === "œufs" ? "Élevage de ponte" : "Production",
+        label: `Récolte vocale ${target} (${qty} ${unit})`,
+        amount: valueEur,
+      });
+      state.finances.cashBalance = (state.finances.cashBalance || 0) + valueEur;
+    }
     pushHudAlert(state, `Production enregistrée : +${qty} ${unit} (${target})`, "info");
     return { reply: `✅ Production enregistrée : ${qty} ${unit} sur ${target} (≈ ${valueEur} €).`, mutated: true };
   }

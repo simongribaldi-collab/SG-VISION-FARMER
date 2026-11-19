@@ -1,4 +1,5 @@
 import { CROP_CATALOG, DISEASE_CATALOG } from "../data/presets.js";
+import { toggleIrrigation } from "../engine/automation.js";
 import { evaluateRotation, getCropById } from "../engine/predictor.js";
 import { esc, fmtEur, pill, progressBar } from "./components.js";
 
@@ -96,7 +97,7 @@ function renderPlotsSection(el, ctx) {
           <tbody>
             ${state.plots.map((p) => {
               const snap = snapMap.get(p.id);
-              const rot = evaluateRotation(p, p.cropId);
+              const rot = evaluateRotation(p, p.cropId, { includeCurrent: false });
               return `
                 <tr>
                   <td><strong>${esc(p.name)}</strong><div class="muted">${esc(p.id)} · pH ${p.ph} · MO ${p.omPct}%</div></td>
@@ -136,19 +137,27 @@ function renderPlotsSection(el, ctx) {
     e.preventDefault();
     const fd = new FormData(e.target);
     const zone = fd.get("zone");
-    const nextIdx = state.plots.length + 1;
     const prefix = zone === "Serre" ? "S" : "P";
-    const id = `${prefix}${nextIdx}`;
-    const col = Math.floor((nextIdx - 1) / 4);
-    const row = (nextIdx - 1) % 4;
+    const maxNum = state.plots.reduce((m, p) => {
+      if (typeof p.id === "string" && p.id.startsWith(prefix)) {
+        const n = parseInt(p.id.slice(prefix.length), 10);
+        if (!Number.isNaN(n) && n > m) return n;
+      }
+      return m;
+    }, 0);
+    const id = `${prefix}${maxNum + 1}`;
+    const sameZoneCount = state.plots.filter((p) => p.zone === zone).length;
+    const xPos = zone === "Serre" ? 1.5 : -11;
+    const zPos = zone === "Serre" ? 4.8 + sameZoneCount * 0.5 : -5.5 + (sameZoneCount % 5) * 3.0;
     state.plots.push({
       id,
       name: fd.get("name"),
       zone,
-      x: zone === "Serre" ? 2 + col * 9 : -10 + col * 8,
-      z: -8 + row * 4.5,
-      w: zone === "Serre" ? 8 : 7,
-      d: zone === "Serre" ? 4.2 : 2.2,
+      ...(zone === "Serre" ? { structureStyle: "greenhouse" } : {}),
+      x: Number(xPos.toFixed(1)),
+      z: Number(Math.min(9.5, zPos).toFixed(1)),
+      w: zone === "Serre" ? 8.5 : 7.5,
+      d: zone === "Serre" ? 4.2 : 2.3,
       rot: 0,
       areaM2: Number(fd.get("areaM2")) || 150,
       soilType: fd.get("soilType"),
@@ -176,7 +185,11 @@ function renderPlotsSection(el, ctx) {
     sel.addEventListener("change", () => {
       const p = state.plots.find((x) => x.id === sel.dataset.plotCrop);
       if (!p) return;
-      p.history = [{ season: "N-1", cropId: p.cropId }, ...(p.history || []).slice(0, 1)];
+      const prevN1 = (p.history || []).find((h) => h.season === "N-1");
+      p.history = [
+        ...(prevN1 ? [{ season: "N-2", cropId: prevN1.cropId }] : []),
+        { season: "N-1", cropId: p.cropId },
+      ];
       p.cropId = sel.value;
       p.gddAccumulated = 50;
       p.stage = "Semis / Plantation";
@@ -188,10 +201,8 @@ function renderPlotsSection(el, ctx) {
 
   el.querySelectorAll("[data-plot-irrig]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const p = state.plots.find((x) => x.id === btn.dataset.plotIrrig);
-      if (!p) return;
-      p.irrigationValveOpen = !p.irrigationValveOpen;
-      if (p.irrigationValveOpen) p.moisturePct = Math.min(88, p.moisturePct + 12);
+      const res = toggleIrrigation(state, btn.dataset.plotIrrig);
+      ctx.toast(res.message);
       ctx.save();
       ctx.rerender();
     });
@@ -223,14 +234,20 @@ function renderRotationsSection(el, ctx) {
         <div style="display:flex;flex-direction:column;gap:8px;">
           ${state.plots.map((p) => {
             const cur = getCropById(p.cropId);
-            const n1 = p.history?.[0] ? getCropById(p.history[0].cropId) : null;
-            const n2 = p.history?.[1] ? getCropById(p.history[1].cropId) : null;
+            const h1 = (p.history || []).find((h) => h.season === "N-1");
+            const h2 = (p.history || []).find((h) => h.season === "N-2");
+            const n1 = h1 ? getCropById(h1.cropId) : null;
+            const n2 = h2 ? getCropById(h2.cropId) : null;
             const bestNext = CROP_CATALOG.map((c) => evaluateRotation(p, c.id)).sort((a, b) => b.score - a.score)[0];
+            const planned = p.nextCropId ? getCropById(p.nextCropId) : null;
             return `
               <div style="padding:9px;border-radius:10px;background:var(--bg-soft);border:1px solid var(--border);">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
                   <strong>${esc(p.id)} · ${esc(p.name)}</strong>
-                  ${pill(`N+1 conseillé : ${bestNext.candidate.icon} ${bestNext.candidate.name} (${bestNext.score}/100)`, "ok")}
+                  <div style="display:flex;gap:5px;flex-wrap:wrap;">
+                    ${planned ? pill(`Planifié N+1 : ${planned.icon} ${planned.name}`, "info") : ""}
+                    ${pill(`Conseillé : ${bestNext.candidate.icon} ${bestNext.candidate.name} (${bestNext.score}/100)`, "ok")}
+                  </div>
                 </div>
                 <div class="muted" style="margin-top:4px;">
                   N-2 : ${n2 ? `${n2.icon} ${esc(n2.name)}` : "—"} →
@@ -438,6 +455,7 @@ function renderDiseasesAndProdSection(el, ctx) {
       label: `Récolte ${fd.get("target")}`,
       amount: val,
     });
+    state.finances.cashBalance = (state.finances.cashBalance || 0) + val;
     ctx.toast("Récolte ajoutée au journal et à la trésorerie !");
     ctx.save();
     ctx.rerender();

@@ -14,16 +14,25 @@ export function pushHudAlert(state, message, severity = "info") {
   return entry;
 }
 
+function getRobotBasePos(state) {
+  const baseStruct =
+    (state.structures || []).find((s) => s.type === "hangar") ||
+    (state.structures || []).find((s) => s.type === "solar_array");
+  if (!baseStruct) return { x: 11, z: -6 };
+  return { x: Number(baseStruct.x) || 11, z: Number((baseStruct.z || -8) + 2.2) };
+}
+
 export function dispatchRobot(state, robotId, plotId, taskLabel = "") {
   const bot = state.equipment.find((e) => e.id === robotId);
   if (!bot) return { ok: false, message: "Robot introuvable." };
 
   const plot = state.plots.find((p) => p.id === plotId);
   if (!plot) {
+    const base = getRobotBasePos(state);
     bot.status = "returning";
     bot.targetPlotId = null;
-    bot.targetX = 11;
-    bot.targetZ = -6;
+    bot.targetX = base.x;
+    bot.targetZ = base.z;
     bot.task = "Retour base / Recharge";
     return { ok: true, message: `${bot.name} rappelé à la base.` };
   }
@@ -63,7 +72,20 @@ export function setGreenhouseVent(state, plotId, pct) {
   return { ok: true, message: `Ouvrants ${plot.name} réglés à ${plot.ventOpeningPct} %.` };
 }
 
-export function toggleCoopDoor(state, lotId = null, forceOpen = null) {
+export function toggleCoopDoor(state, lotId = null, forceOpen = null, structureId = null) {
+  if (structureId) {
+    const struct = state.structures.find((s) => s.id === structureId);
+    if (!struct) return { ok: false, message: "Poulailler introuvable." };
+    const nextOpen = forceOpen === null ? !struct.doorOpen : Boolean(forceOpen);
+    struct.doorOpen = nextOpen;
+    state.livestock
+      .filter((l) => l.kind === "ponte" && (!l.coopStructureId || l.coopStructureId === structureId))
+      .forEach((l) => {
+        l.doorOpen = nextOpen;
+      });
+    return { ok: true, message: `Trappe ${struct.label} ${nextOpen ? "OUVERTE" : "FERMÉE"}.` };
+  }
+
   const lots = lotId
     ? state.livestock.filter((l) => l.id === lotId)
     : state.livestock.filter((l) => l.kind === "ponte");
@@ -139,13 +161,15 @@ export function evaluateAutomations(state) {
         });
       desc = `Ouvrants serres réglés à ${act.pct || 80} %`;
     } else if (act.type === "storm_protect") {
+      const base = getRobotBasePos(state);
       state.plots.filter((p) => p.zone === "Serre").forEach((g) => (g.ventOpeningPct = 0));
       state.equipment
         .filter((e) => e.kind === "drone")
         .forEach((d) => {
           d.status = "returning";
-          d.targetX = 11;
-          d.targetZ = -6;
+          d.targetPlotId = null;
+          d.targetX = base.x;
+          d.targetZ = base.z;
           d.task = "Rappel vent fort";
         });
       desc = "Protection tempête : drone rappelé & serres fermées";
@@ -175,10 +199,19 @@ export function evaluateAutomations(state) {
  * Anime les robots mobiles en 3D et met a jour batterie / patrouille sur la parcelle cible.
  */
 export function tickRobots(state, dtSeconds, elapsedSec) {
+  const base = getRobotBasePos(state);
   for (const eq of state.equipment) {
     if (!eq.autonomous) continue;
     if (eq.status === "working") {
-      const plot = state.plots.find((p) => p.id === eq.targetPlotId);
+      const plot = eq.targetPlotId ? state.plots.find((p) => p.id === eq.targetPlotId) : null;
+      if (eq.targetPlotId && !plot) {
+        eq.status = "returning";
+        eq.targetPlotId = null;
+        eq.targetX = base.x;
+        eq.targetZ = base.z;
+        eq.task = "Parcelle supprimée — retour base";
+        continue;
+      }
       if (plot) {
         // Trajectoire aller-retour le long des rangs de la planche cible
         const span = Math.max(1.5, (plot.w || 6) * 0.42);
@@ -193,23 +226,26 @@ export function tickRobots(state, dtSeconds, elapsedSec) {
         const step = Math.min(dist, dtSeconds * (eq.kind === "drone" ? 4.8 : 2.1));
         eq.x += (dx / dist) * step;
         eq.z += (dz / dist) * step;
+        eq.heading = Math.atan2(dx, dz);
       }
       eq.batteryPct = Math.max(12, Number((eq.batteryPct - dtSeconds * 0.06).toFixed(1)));
       eq.hoursTotal = Number((eq.hoursTotal + dtSeconds / 3600).toFixed(2));
       if (eq.batteryPct <= 15) {
         eq.status = "returning";
-        eq.targetX = 11;
-        eq.targetZ = -6;
+        eq.targetPlotId = null;
+        eq.targetX = base.x;
+        eq.targetZ = base.z;
         eq.task = "Batterie faible — retour charge solaire";
       }
     } else if (eq.status === "returning") {
-      const dx = 11 - eq.x;
-      const dz = -6 - eq.z;
+      const dx = base.x - eq.x;
+      const dz = base.z - eq.z;
       const dist = Math.hypot(dx, dz);
       if (dist > 0.25) {
         const step = Math.min(dist, dtSeconds * 3.0);
         eq.x += (dx / dist) * step;
         eq.z += (dz / dist) * step;
+        eq.heading = Math.atan2(dx, dz);
       } else {
         eq.status = "idle";
         eq.task = "En charge au hangar solaire";

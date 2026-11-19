@@ -2,10 +2,11 @@ import { processNaturalCommand } from "../engine/aiAssistant.js";
 import { simulateFuture } from "../engine/predictor.js";
 import { esc } from "./components.js";
 
-const STORAGE_KEY = "sg_vision_farmer_state_v1";
+const STORAGE_KEY = "sg_vision_farmer_state_v2";
 const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("sg_farmer_sync") : null;
 
-async function loadState() {
+async function loadState(overrideState = null) {
+  if (overrideState && overrideState.farm) return overrideState;
   try {
     const resp = await fetch("/api/state", { cache: "no-store" });
     if (resp.ok) {
@@ -34,8 +35,8 @@ async function persistState(state) {
   if (channel) channel.postMessage({ type: "state_updated", state });
 }
 
-async function renderHud() {
-  const state = await loadState();
+async function renderHud(overrideState = null) {
+  const state = await loadState(overrideState);
   const meta = document.getElementById("hud-meta");
   const kpis = document.getElementById("hud-kpis");
   const targets = document.getElementById("hud-targets");
@@ -76,7 +77,15 @@ async function renderHud() {
       if (Array.isArray(h.alerts)) remoteAlerts = h.alerts;
     }
   } catch {}
-  const allAlerts = [...remoteAlerts, ...(state.hud?.alerts || [])].slice(0, 6);
+  const seen = new Set();
+  const allAlerts = [...remoteAlerts, ...(state.hud?.alerts || [])]
+    .filter((a) => {
+      const key = `${a.id || ""}:${a.message || ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 6);
   alertsEl.innerHTML = allAlerts.length
     ? allAlerts.map((a) => `<div style="padding:7px 9px;border-radius:8px;border:1px solid rgba(56,189,248,0.28);font-size:12px;">◈ ${esc(a.message)}</div>`).join("")
     : `<div class="muted">Aucune alerte active. Tout est nominal.</div>`;
@@ -139,7 +148,13 @@ document.getElementById("btn-voice").addEventListener("click", () => {
 });
 
 if (channel) {
-  channel.onmessage = () => renderHud();
+  channel.onmessage = (ev) => {
+    if (ev.data?.type === "state_updated" && ev.data.state) {
+      renderHud(ev.data.state);
+    } else {
+      renderHud();
+    }
+  };
 }
-setInterval(renderHud, 4000);
+setInterval(() => renderHud(), 4000);
 renderHud();

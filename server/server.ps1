@@ -1,13 +1,16 @@
 param(
     [int]$Port = 8765,
-    [string]$BindHost = "127.0.0.1"
+    [string]$BindHost = "127.0.0.1",
+    [string]$DataDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $PSScriptRoot
 $PublicDir = Join-Path $RootDir "public"
-$DataDir = Join-Path $RootDir "data"
+if ([string]::IsNullOrWhiteSpace($DataDir)) {
+    $DataDir = Join-Path $RootDir "data"
+}
 if (-not (Test-Path $DataDir)) {
     New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
 }
@@ -347,7 +350,7 @@ try {
                 Send-Json $stream @{
                     ok        = $true
                     app       = "SG Vision Farmer"
-                    version   = "1.0.0"
+                    version   = "3.0.0"
                     uptimeSec = [int]((Get-Date) - $StartTime).TotalSeconds
                     hasState  = (Test-Path $StateFile)
                     mcpTools  = $McpTools.Count
@@ -394,6 +397,10 @@ try {
                     continue
                 }
                 if ($method -eq "POST") {
+                    if ([string]::IsNullOrWhiteSpace($req.Body)) {
+                        Send-Json $stream @{ error = "Empty hud payload" } 400
+                        continue
+                    }
                     [System.IO.File]::WriteAllText($HudFile, $req.Body, [System.Text.Encoding]::UTF8)
                     Send-Json $stream @{ ok = $true } 200
                     continue
@@ -448,7 +455,7 @@ try {
                     $result = @{
                         protocolVersion = "2025-03-26"
                         capabilities    = @{ tools = @{ listChanged = $false } }
-                        serverInfo      = @{ name = "SG-Vision-Farmer-MCP"; version = "1.0.0" }
+                        serverInfo      = @{ name = "SG-Vision-Farmer-MCP"; version = "3.0.0" }
                     }
                 } elseif ($rpcMethod -eq "notifications/initialized") {
                     Send-Text $stream "" "application/json" 202

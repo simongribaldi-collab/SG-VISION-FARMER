@@ -34,11 +34,14 @@ class AppController {
     this.rafId = null;
     this.lastFrameTs = 0;
     this.lastProcessedCmdId = null;
+    this._hudPollInitialized = false;
+    this._sessionStartMs = Date.now();
     this.serverStatus = { online: false, mcpTools: 6 };
     this.uiState = {
       tab: "3d",
       overlay: "normal",
       showArPins: false,
+      shadowsEnabled: true,
       buildActive: false,
       buildCategory: "all",
       buildType: "bed_open",
@@ -96,22 +99,31 @@ class AppController {
   }
 
   async loadInitialState() {
-    const ensureV2 = (st) => {
+    const ensureV3 = (st) => {
       if (!st || !st.farm) return null;
-      if (!st.terrain || !Array.isArray(st.terrain.heights)) {
-        // Migration automatique V1 -> V2 avec relief, corps de ferme, haies, chemins, riviere et multi-especes
-        return buildPresetState(st.farm.presetId || "maraichage_serre");
+      if (!st.terrain || !Array.isArray(st.terrain.heights) || (st.version || 0) < 3) {
+        const presetId = st.farm.presetId || "maraichage_serre";
+        const fresh = buildPresetState(presetId);
+        const def = buildPresetState(presetId);
+        const isCustomizedMeta = st.farm.name && st.farm.name !== def.farm.name;
+        if (isCustomizedMeta) {
+          fresh.farm.name = st.farm.name;
+          if (st.farm.location) fresh.farm.location = st.farm.location;
+          if (st.farm.areaHa) fresh.farm.areaHa = st.farm.areaHa;
+        }
+        return { state: fresh, migrated: true };
       }
-      return st;
+      return { state: st, migrated: false };
     };
 
     try {
       const r = await fetch("/api/state", { cache: "no-store" });
       if (r.ok) {
-        const data = ensureV2(await r.json());
-        if (data && data.farm) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-          return data;
+        const res = ensureV3(await r.json());
+        if (res?.state?.farm) {
+          if (res.migrated) await this.saveState(res.state);
+          else localStorage.setItem(STORAGE_KEY, JSON.stringify(res.state));
+          return res.state;
         }
       }
     } catch {}
@@ -119,8 +131,11 @@ class AppController {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = ensureV2(JSON.parse(raw));
-        if (parsed && parsed.farm) return parsed;
+        const res = ensureV3(JSON.parse(raw));
+        if (res?.state?.farm) {
+          if (res.migrated) await this.saveState(res.state);
+          return res.state;
+        }
       }
     } catch {}
 
@@ -153,7 +168,19 @@ class AppController {
       if (!r.ok) return;
       const hud = await r.json();
       const cmd = hud.commands?.[0];
-      if (!cmd || cmd.id === this.lastProcessedCmdId) return;
+      if (!cmd) {
+        this._hudPollInitialized = true;
+        return;
+      }
+      if (!this._hudPollInitialized) {
+        this._hudPollInitialized = true;
+        const cmdMs = cmd.timestamp ? Date.parse(cmd.timestamp) : 0;
+        if (!cmdMs || cmdMs < this._sessionStartMs - 5000) {
+          this.lastProcessedCmdId = cmd.id;
+          return;
+        }
+      }
+      if (cmd.id === this.lastProcessedCmdId) return;
       this.lastProcessedCmdId = cmd.id;
 
       let res = null;
@@ -172,8 +199,9 @@ class AppController {
   }
 
   refreshForecastOnly() {
-    const horizon = Math.max(14, this.state.simulation.dayOffset || 0, this.uiState.forecastHorizon || 60);
-    this.forecast = simulateFuture(this.state, horizon, this.state.simulation.scenario || "normal");
+    const dayOff = this.state.simulation.dayOffset || 0;
+    const horizon = Math.max(14, dayOff, this.uiState.forecastHorizon || 60);
+    this.forecast = simulateFuture(this.state, horizon, this.state.simulation.scenario || "normal", dayOff);
   }
 
   replaceState(nextState) {
@@ -317,11 +345,32 @@ class AppController {
     box.scrollTop = box.scrollHeight;
   }
 
-  rerender() {
-    this.refreshForecastOnly();
+  updateStatusRibbon() {
+    const ribbon = this.root.querySelector("#status-ribbon");
+    if (!ribbon || !this.state || !this.forecast) return;
     const s = this.state;
     const f = this.forecast;
     const wx = s.weather.current;
+    const dayIdx = Math.min(s.simulation.dayOffset || 0, f.daily.length - 1);
+    const dSnap = f.daily[dayIdx];
+    ribbon.innerHTML = `
+      <div class="ribbon-group">
+        ${pill(`🏆 Autonomie ${f.globalScore}/100`, f.globalScore >= 75 ? "ok" : "info")}
+        ${pill(`🌦️ ${wx.tempC}°C · HR ${wx.rhPct}% · Vent ${wx.windKmh} km/h`, wx.windKmh > 40 ? "warn" : "info")}
+        ${pill(`💧 Eau ${dSnap.waterStockM3} m³`, dSnap.waterStockM3 < 20 ? "bad" : "ok")}
+        ${pill(`⚡ Énergie ${dSnap.netEnergyKwh >= 0 ? "+" : ""}${dSnap.netEnergyKwh} kWh`, dSnap.netEnergyKwh >= 0 ? "ok" : "warn")}
+        ${pill(`💶 Tréso J+${dayIdx} : ${fmtEur(dSnap.cashBalance)}`, dSnap.cashBalance >= 5000 ? "ok" : "warn")}
+      </div>
+      <div class="ribbon-group">
+        ${pill(`🤖 ${s.equipment.filter((e) => e.autonomous && e.status === "working").length} robots en mission`, "info")}
+        ${pill(this.serverStatus.online ? "MCP + Serveur Local OK" : "Mode Statique Local", this.serverStatus.online ? "ok" : "warn")}
+      </div>
+    `;
+  }
+
+  rerender() {
+    this.refreshForecastOnly();
+    const s = this.state;
 
     const sub = this.root.querySelector("#hdr-farm-sub");
     if (sub) sub.textContent = `${s.farm.name} · ${s.farm.areaHa} ha · ${s.farm.location.name}`;
@@ -340,22 +389,7 @@ class AppController {
       });
     });
 
-    const dayIdx = Math.min(s.simulation.dayOffset || 0, f.daily.length - 1);
-    const dSnap = f.daily[dayIdx];
-    const ribbon = this.root.querySelector("#status-ribbon");
-    ribbon.innerHTML = `
-      <div class="ribbon-group">
-        ${pill(`🏆 Autonomie ${f.globalScore}/100`, f.globalScore >= 75 ? "ok" : "info")}
-        ${pill(`🌦️ ${wx.tempC}°C · HR ${wx.rhPct}% · Vent ${wx.windKmh} km/h`, wx.windKmh > 40 ? "warn" : "info")}
-        ${pill(`💧 Eau ${dSnap.waterStockM3} m³`, dSnap.waterStockM3 < 20 ? "bad" : "ok")}
-        ${pill(`⚡ Énergie ${dSnap.netEnergyKwh >= 0 ? "+" : ""}${dSnap.netEnergyKwh} kWh`, dSnap.netEnergyKwh >= 0 ? "ok" : "warn")}
-        ${pill(`💶 Tréso J+${dayIdx} : ${fmtEur(dSnap.cashBalance)}`, dSnap.cashBalance >= 5000 ? "ok" : "warn")}
-      </div>
-      <div class="ribbon-group">
-        ${pill(`🤖 ${s.equipment.filter((e) => e.autonomous && e.status === "working").length} robots en mission`, "info")}
-        ${pill(this.serverStatus.online ? "MCP + Serveur Local OK" : "Mode Statique Local", this.serverStatus.online ? "ok" : "warn")}
-      </div>
-    `;
+    this.updateStatusRibbon();
 
     const main = this.root.querySelector("#main-content");
     const ctx = {
@@ -367,6 +401,7 @@ class AppController {
       save: () => this.saveState(),
       rerender: () => this.rerender(),
       refreshForecastOnly: () => this.refreshForecastOnly(),
+      updateStatusRibbon: () => this.updateStatusRibbon(),
       replaceState: (next) => this.replaceState(next),
       toast: (msg) => this.toast(msg),
       mountCanvas: (canvas, onSelect) => this.mountCanvas(canvas, onSelect),
@@ -388,18 +423,35 @@ class AppController {
     const onSculptTerrain = (wx, wz) => {
       sculptTerrainAt(this.state, wx, wz, this.uiState.sculptTool || "raise", this.uiState.sculptRadius || 5);
     };
-    if (!this.engine3d || this.engine3d.canvas !== canvas) {
-      const prevCam = this.engine3d?.camera;
+    const onSculptEnd = () => this.saveState();
+    if (!this.engine3d) {
       this.engine3d = new Farm3DEngine(canvas, {
         onSelect,
         onPlaceBuilding: (placement) => this.placeBuilding3D(placement),
         onSculptTerrain,
+        onSculptEnd,
       });
-      if (prevCam) this.engine3d.camera = prevCam;
     } else {
+      if (this.engine3d.canvas !== canvas && canvas.parentNode) {
+        this.engine3d.canvas.id = canvas.id || "farm-canvas";
+        canvas.replaceWith(this.engine3d.canvas);
+      }
       this.engine3d.callbacks.onSelect = onSelect;
+      this.engine3d.callbacks.onPlaceBuilding = (placement) => this.placeBuilding3D(placement);
       this.engine3d.callbacks.onSculptTerrain = onSculptTerrain;
+      this.engine3d.callbacks.onSculptEnd = onSculptEnd;
     }
+  }
+
+  nextPlotId(prefix) {
+    const maxNum = (this.state.plots || []).reduce((max, p) => {
+      if (typeof p.id === "string" && p.id.startsWith(prefix)) {
+        const n = parseInt(p.id.slice(prefix.length), 10);
+        if (!Number.isNaN(n) && n > max) return n;
+      }
+      return max;
+    }, 0);
+    return `${prefix}${maxNum + 1}`;
   }
 
   placeBuilding3D({ type, x, z, rot }) {
@@ -408,23 +460,24 @@ class AppController {
 
     if (type === "bed_open" || type === "greenhouse" || type === "glass_house") {
       const isGh = type === "greenhouse" || type === "glass_house";
-      const id = `${isGh ? "S" : "P"}${this.state.plots.length + 1}`;
+      const id = this.nextPlotId(isGh ? "S" : "P");
       this.state.plots.push({
         id,
         name: `${cat.label} ${id}`,
         zone: isGh ? "Serre" : "Plein champ",
+        ...(isGh ? { structureStyle: type } : {}),
         x,
         z,
         w: cat.w,
         d: cat.d,
         rot,
-        areaM2: isGh ? 400 : 140,
+        areaM2: type === "glass_house" ? 700 : isGh ? 400 : 140,
         soilType: "Limono-argileux",
         ph: 6.7,
         omPct: 4.5,
         cropId: isGh ? "tomate" : "laitue",
         plantedDayOffset: 0,
-        gddAccumulated: 120,
+        gddAccumulated: 260,
         stage: "Croissance",
         moisturePct: 60,
         healthPct: 94,
@@ -481,10 +534,16 @@ class AppController {
             this.state.simulation.dayOffset = (this.state.simulation.dayOffset + 1) % 91;
             if (this.state.simulation.dayOffset >= 30) this.state.farm.gamification.simulatedFutureUsed = true;
             this.refreshForecastOnly();
+            this.updateStatusRibbon();
             const sl = document.getElementById("slider-day");
             const lbl = document.getElementById("lbl-day-offset");
+            const dateLbl = document.getElementById("lbl-day-date");
             if (sl) sl.value = String(this.state.simulation.dayOffset);
             if (lbl) lbl.textContent = this.state.simulation.dayOffset === 0 ? "Aujourd'hui (Direct)" : `J+${this.state.simulation.dayOffset}`;
+            if (dateLbl) {
+              const dSnap = this.forecast.daily[Math.min(this.state.simulation.dayOffset, this.forecast.daily.length - 1)];
+              dateLbl.textContent = dSnap?.date || "";
+            }
           }
         }
 

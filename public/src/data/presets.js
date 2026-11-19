@@ -690,21 +690,25 @@ export function generateTerrainHeights(presetId = "valley_river", res = 32) {
       let h = 0;
 
       if (presetId === "hillside") {
-        // Coteau montant vers le nord-ouest + replat central pour le corps de ferme
-        h = (-nz * 2.2 - nx * 0.9) + Math.sin(nx * 3.2) * 0.35;
-        if (Math.hypot(nx, nz) < 0.45) h *= 0.35;
+        // Coteau montant vers le nord-ouest + replat central progressif pour le corps de ferme
+        const raw = (-nz * 2.2 - nx * 0.9) + Math.sin(nx * 3.2) * 0.35;
+        const r = Math.hypot(nx, nz);
+        const plateau = Math.min(1, Math.max(0.28, (r - 0.18) / 0.52));
+        h = raw * plateau;
       } else if (presetId === "bocage_rolling") {
-        h = Math.sin(nx * 2.8) * Math.cos(nz * 2.4) * 1.35 + Math.sin((nx + nz) * 4.2) * 0.3;
-        if (Math.hypot(nx, nz) < 0.4) h *= 0.3;
+        const raw = Math.sin(nx * 2.8) * Math.cos(nz * 2.4) * 1.35 + Math.sin((nx + nz) * 4.2) * 0.3;
+        const r = Math.hypot(nx, nz);
+        const plateau = Math.min(1, Math.max(0.24, (r - 0.15) / 0.5));
+        h = raw * plateau;
       } else if (presetId === "valley_river") {
-        // Collines douces sur les bords et lit de riviere au sud-est
-        const distCenter = Math.hypot(nx * 0.8, nz * 0.8);
-        h = Math.max(0, (distCenter - 0.38) * 2.4) + Math.sin(nx * 3.0) * 0.25;
-        // Sillon de riviere vers z > 0.45
-        const riverLine = 0.58 + Math.sin(nx * 2.2) * 0.12;
+        // Collines douces en peripherie, replat central ferme et lit de riviere aligne (z ~ 12.4m => nz ~ 0.48)
+        const distCenter = Math.hypot(nx * 0.85, (nz + 0.12) * 0.85);
+        h = Math.max(0, (distCenter - 0.42) * 2.5) + Math.sin(nx * 3.0) * 0.18;
+        if (Math.hypot(nx, nz + 0.18) < 0.46) h *= 0.25;
+        const riverLine = 0.48 + Math.sin(nx * 2.2) * 0.04;
         const dRiver = Math.abs(nz - riverLine);
-        if (dRiver < 0.16) {
-          h -= (0.16 - dRiver) * 3.5;
+        if (dRiver < 0.17) {
+          h -= (0.17 - dRiver) * 3.6;
         }
       } else {
         h = Math.sin(nx * 2) * Math.cos(nz * 2) * 0.12;
@@ -763,7 +767,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
       id: "P1",
       name: isLarge ? "Îlot Nord 1 — Blé Tendre" : "Planche P1 — Carottes",
       zone: "Plein champ",
-      x: -11, z: -6.5, w: 7.5, d: 2.3, rot: 0,
+      x: -11, z: -5.5, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 350000 : isMicro ? 24 : 180,
       soilType: "Limono-argileux",
       ph: 6.7, omPct: 4.2,
@@ -777,7 +781,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
       id: "P2",
       name: isLarge ? "Îlot Sud 2 — Maïs Grain" : "Planche P2 — Maïs Doux & Courges",
       zone: "Plein champ",
-      x: -11, z: -3.2, w: 7.5, d: 2.3, rot: 0,
+      x: -11, z: -2.5, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 420000 : isMicro ? 24 : 160,
       soilType: "Limoneux",
       ph: 6.5, omPct: 3.9,
@@ -791,7 +795,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
       id: "P3",
       name: isLarge ? "Îlot Est 3 — Tournesol" : "Planche P3 — Tournesols & Mellifères",
       zone: "Plein champ",
-      x: -11, z: 0.1, w: 7.5, d: 2.3, rot: 0,
+      x: -11, z: 0.5, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 260000 : isMicro ? 24 : 180,
       soilType: "Limoneux",
       ph: 6.8, omPct: 4.5,
@@ -805,7 +809,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
       id: "P4",
       name: "Planche P4 — Laitues & Choux",
       zone: "Plein champ",
-      x: -11, z: 3.4, w: 7.5, d: 2.3, rot: 0,
+      x: -11, z: 3.5, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 120000 : isMicro ? 24 : 150,
       soilType: "Argilo-calcaire",
       ph: 7.0, omPct: 4.0,
@@ -819,7 +823,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
       id: "P5",
       name: "Parcelle P5 — Vigne Palissée",
       zone: "Plein champ",
-      x: -11, z: 6.7, w: 7.5, d: 2.3, rot: 0,
+      x: -11, z: 6.3, w: 7.5, d: 2.3, rot: 0,
       areaM2: isLarge ? 95000 : 220,
       soilType: "Argilo-calcaire",
       ph: 7.1, omPct: 3.6,
@@ -831,8 +835,9 @@ export function buildPresetState(presetId = "maraichage_serre") {
     },
     {
       id: "S1",
-      name: "Serre Chapelle 1 — Tomates Grappe",
+      name: isLarge ? "Serre Verre 1 — Tomates Grappe" : "Serre Chapelle 1 — Tomates Grappe",
       zone: "Serre",
+      structureStyle: isLarge ? "glass_house" : "greenhouse",
       x: 1.5, z: -5.5, w: 8.5, d: 4.2, rot: 0,
       areaM2: isMicro ? 120 : isLarge ? 2500 : 600,
       soilType: "Amendé compost",
@@ -850,6 +855,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
       id: "S2",
       name: "Tunnel 2 — Fraises sur Butte",
       zone: "Serre",
+      structureStyle: "greenhouse",
       x: 1.5, z: 0.2, w: 8.5, d: 4.2, rot: 0,
       areaM2: isMicro ? 100 : isLarge ? 1800 : 480,
       soilType: "Sablo-limoneux",
@@ -870,41 +876,41 @@ export function buildPresetState(presetId = "maraichage_serre") {
         { id: "STR-WX", type: "weather_station", label: "Station Météo IoT", x: 0, z: -14, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
       ]
     : [
-        // Corps de ferme traditionnel au Nord + Cour & Boutique
-        { id: "STR-CORPS", type: "farmhouse_courtyard", label: "Corps de Ferme Principal (Pierre & Tuiles)", x: 0, z: -14.5, w: 11, d: 8.5, h: 4.8, rot: 0 },
-        { id: "STR-BARN-ST", type: "stone_barn", label: "Grange en Pierre & Foin", x: -11, z: -13.5, w: 8.5, d: 5, h: 4.5, rot: 0 },
-        { id: "STR-SHOP", type: "farm_shop", label: "Boutique Vente à la Ferme", x: -5.5, z: -9.2, w: 4.8, d: 3.5, h: 3.1, rot: 0 },
-        { id: "STR-SILO", type: "grain_silo", label: "Silo Céréales & Aliment", x: 8.2, z: -15, w: 3.0, d: 3.0, h: 6.5, rot: 0 },
-        { id: "STR-HAN", type: "hangar", label: "Hangar Robots & Chambre Froide", x: 13.5, z: -11, w: 7.5, d: 5, h: 3.9, rot: 0 },
+        // Corps de ferme traditionnel au Nord + Cour & Boutique (sans chevauchement)
+        { id: "STR-CORPS", type: "farmhouse_courtyard", label: "Corps de Ferme Principal (Pierre & Tuiles)", x: 0, z: -14.5, w: isMicro ? 9.5 : 11, d: 8.5, h: 4.8, rot: 0 },
+        { id: "STR-BARN-ST", type: "stone_barn", label: "Grange en Pierre & Foin", x: -11.2, z: -14.2, w: 8.5, d: 5, h: 4.5, rot: 0 },
+        { id: "STR-SHOP", type: "farm_shop", label: "Boutique Vente à la Ferme", x: -8.4, z: -9.6, w: 4.2, d: 2.8, h: 3.1, rot: 0 },
+        { id: "STR-SILO", type: "grain_silo", label: "Silo Céréales & Aliment", x: 8.2, z: -15, w: isLarge ? 3.8 : 3.0, d: isLarge ? 3.8 : 3.0, h: isLarge ? 7.6 : 6.5, rot: 0 },
+        { id: "STR-HAN", type: "hangar", label: "Hangar Robots & Chambre Froide", x: 13.5, z: -11, w: isLarge ? 9 : 7.5, d: 5, h: 3.9, rot: 0 },
 
-        // Chemins d'exploitation & Route cour
+        // Chemins d'exploitation & Route cour relies jusqu'au pont
         { id: "STR-RD1", type: "road_paved", label: "Cour Empierrée Corps de Ferme", x: 0, z: -9.5, w: 9, d: 2.8, h: 0.1, rot: 0 },
-        { id: "STR-PTH1", type: "path_dirt", label: "Allée Centrale Exploitation", x: -4.8, z: -1, w: 2.2, d: 16, h: 0.08, rot: 0 },
-        { id: "STR-PTH2", type: "path_dirt", label: "Chemin des Pâturages", x: 4, z: 5.5, w: 15, d: 2.0, h: 0.08, rot: 0 },
+        { id: "STR-PTH1", type: "path_dirt", label: "Allée Centrale Exploitation", x: -4.8, z: 0.8, w: 2.2, d: 19.6, h: 0.08, rot: 0 },
+        { id: "STR-PTH2", type: "path_dirt", label: "Chemin des Pâturages", x: 3.8, z: 4.8, w: 15, d: 2.0, h: 0.08, rot: 0 },
 
         // Haies bocageres, murets & verger agroforestier
-        { id: "STR-HDG1", type: "hedge_row", label: "Haie Brise-Vent Nord-Ouest", x: -17.5, z: -5, w: 1.4, d: 11, h: 2.8, rot: 0 },
-        { id: "STR-HDG2", type: "hedge_row", label: "Haie Mellifère Sud-Ouest", x: -17.5, z: 5, w: 1.4, d: 9, h: 2.6, rot: 0 },
-        { id: "STR-WALL1", type: "stone_wall", label: "Muret Pierre Sèche Cour", x: -6, z: -11, w: 5.5, d: 0.7, h: 1.1, rot: 0 },
+        { id: "STR-HDG1", type: "hedge_row", label: "Haie Brise-Vent Nord-Ouest", x: -17.5, z: -4.5, w: 1.4, d: 11, h: 2.8, rot: 0 },
+        { id: "STR-HDG2", type: "hedge_row", label: "Haie Mellifère Sud-Ouest", x: -17.5, z: 4.5, w: 1.4, d: 8.0, h: 2.6, rot: 0 },
+        { id: "STR-WALL1", type: "stone_wall", label: "Muret Pierre Sèche Cour", x: -12.5, z: -10.6, w: 4.5, d: 0.7, h: 1.1, rot: 0 },
         { id: "STR-TR1", type: "hedge_tree", label: "Pommier Verger 1", x: -15.5, z: -9.5, w: 2.4, d: 2.4, h: 4.2, rot: 0 },
         { id: "STR-TR2", type: "hedge_tree", label: "Noyer Ancien", x: 7.2, z: -9.5, w: 2.8, d: 2.8, h: 4.8, rot: 0 },
 
-        // Riviere au sud + Pont
-        { id: "STR-RIV1", type: "river_seg", label: "Rivière de la Drôme (Amont)", x: -12, z: 12.2, w: 12, d: 3.2, h: 0.14, rot: 0.08 },
-        { id: "STR-RIV2", type: "river_seg", label: "Rivière (Passage Pont)", x: 0, z: 12.8, w: 12, d: 3.4, h: 0.14, rot: -0.05 },
-        { id: "STR-RIV3", type: "river_seg", label: "Rivière (Aval)", x: 12, z: 12.1, w: 12, d: 3.2, h: 0.14, rot: 0.06 },
+        // Riviere au sud + Pont aligne sur le lit
+        { id: "STR-RIV1", type: "river_seg", label: "Rivière / Cours d'eau (Amont)", x: -13.5, z: 12.3, w: 14, d: 3.1, h: 0.14, rot: 0.025 },
+        { id: "STR-RIV2", type: "river_seg", label: "Rivière (Passage Pont)", x: 0, z: 12.5, w: 14, d: 3.2, h: 0.14, rot: 0 },
+        { id: "STR-RIV3", type: "river_seg", label: "Rivière (Aval)", x: 13.5, z: 12.3, w: 14, d: 3.1, h: 0.14, rot: -0.025 },
         { id: "STR-BRG", type: "bridge", label: "Pont de Pierre de la Ferme", x: -4.8, z: 12.5, w: 4.2, d: 4.2, h: 1.3, rot: 0 },
 
         // Eau, Energie, Capteurs, Elevage & Ponte
-        { id: "STR-WX", type: "weather_station", label: "Station Météo Pro", x: -4.8, z: -13.5, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
+        { id: "STR-WX", type: "weather_station", label: "Station Météo Pro", x: 6.6, z: -11.4, w: 1.5, d: 1.5, h: 3.6, rot: 0 },
         { id: "STR-SOL", type: "solar_array", label: "Ombrière Solaire PV", x: 13.5, z: -4.5, w: 5.5, d: 3.2, h: 2.0, rot: 0, kwPeak: isLarge ? 65 : isMicro ? 6 : 24 },
         { id: "STR-WND", type: "wind_turbine", label: "Éolienne Ferme", x: 16.5, z: -15, w: 2, d: 2, h: 7.8, rot: 0, kwPeak: isLarge ? 25 : 5 },
         { id: "STR-TANK", type: "water_tank", label: "Château d'Eau / Cuve", x: 10.5, z: -7.5, w: 2.8, d: 2.8, h: 3.2, rot: 0 },
-        { id: "STR-POND", type: "pond", label: "Mare & Réserve Pluie", x: -15, z: 10.2, w: 5.2, d: 4.2, h: 0.3, rot: 0 },
-        { id: "STR-API", type: "apiary", label: "Rucher (4 ruches)", x: -16, z: -12, w: 3.2, d: 2, h: 1.1, rot: 0 },
+        { id: "STR-POND", type: "pond", label: "Mare & Réserve Pluie", x: -13.2, z: 9.0, w: 4.6, d: 2.6, h: 0.3, rot: 0 },
+        { id: "STR-API", type: "apiary", label: "Rucher (4 ruches)", x: -16.5, z: -12, w: 3.2, d: 2, h: 1.1, rot: 0 },
         { id: "STR-COOP", type: isPoly ? "coop_fixed" : "coop_mobile", label: isPoly ? "Bâtiment Ponte 1200" : "Poulailler Plein Air", x: 0.5, z: 8.2, w: isPoly ? 7 : 4.0, d: isPoly ? 4 : 2.8, h: isPoly ? 2.9 : 2.1, rot: 0, doorOpen: true },
-        { id: "STR-BARN", type: "barn_livestock", label: "Étable & Bergerie", x: 13.5, z: 2.5, w: 8.5, d: 5, h: 3.8, rot: 0 },
-        { id: "STR-PAD1", type: "paddock", label: "Paddock A (Vaches & Brebis)", x: 10.5, z: 8.2, w: 10.5, d: 5.5, h: 0.25, rot: 0 },
+        { id: "STR-BARN", type: "barn_livestock", label: "Étable & Bergerie", x: 13.5, z: 2.2, w: 8.5, d: 4.8, h: 3.8, rot: 0 },
+        { id: "STR-PAD1", type: "paddock", label: "Paddock A (Vaches & Brebis)", x: 10.5, z: 8.4, w: 10.5, d: 4.4, h: 0.25, rot: 0 },
       ];
 
   const livestock = isSandbox ? [] : [
@@ -1206,7 +1212,7 @@ export function buildPresetState(presetId = "maraichage_serre") {
   });
 
   return {
-    version: 2,
+    version: 3,
     farm: {
       name: scaleMeta.name,
       presetId,

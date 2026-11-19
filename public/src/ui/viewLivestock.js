@@ -168,6 +168,7 @@ export function renderViewLivestock(container, ctx) {
         label: `Collecte ${lot.name} (${eggs} œufs)`,
         amount: rev,
       });
+      state.finances.cashBalance = (state.finances.cashBalance || 0) + rev;
       ctx.toast(`+${eggs} œufs enregistrés (+${rev} €) !`);
       ctx.save();
       ctx.rerender();
@@ -206,6 +207,9 @@ export function renderViewLivestock(container, ctx) {
     const kind = isPonte ? "ponte" : "elevage";
     const count = Number(fd.get("count")) || 20;
     const rate = Number(fd.get("layingRatePct")) || (speciesId === "canard" ? 45 : 85);
+    const linkedStruct = isPonte
+      ? state.structures.find((s) => s.type === "coop_mobile" || s.type === "coop_fixed")
+      : state.structures.find((s) => s.type === "barn_livestock" || s.type === "paddock");
 
     state.livestock.push({
       id: `LOT-${Date.now()}`,
@@ -217,13 +221,14 @@ export function renderViewLivestock(container, ctx) {
       ageWeeks: 28,
       layingRatePct: isPonte ? rate : 0,
       eggsToday: isPonte ? Math.round((count * rate) / 100) : 0,
-      eggPriceUnit: 0.38,
-      feedGramsPerDay: sp.feedG,
-      waterLitersPerDay: sp.waterL,
+      eggPriceUnit: speciesId === "canard" ? 0.55 : 0.38,
+      feedGramsPerDay: sp.defaultFeedG,
+      waterLitersPerDay: sp.defaultWaterL,
       welfarePct: 95,
       doorOpen: true,
       lightSchedule: isPonte ? "06:00 - 20:30" : "Naturel",
       paddockName: "Parcours Paddock A",
+      coopStructureId: linkedStruct?.id || null,
       parasiteRiskPct: 7,
     });
     ctx.toast(`${sp.icon} ${sp.label} ajouté au cheptel et visible en 3D !`);

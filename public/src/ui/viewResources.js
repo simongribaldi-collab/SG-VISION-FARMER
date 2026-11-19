@@ -120,6 +120,7 @@ export function renderViewResources(container, ctx) {
           label: `Réappro ${r.name} (+${add} ${r.unit})`,
           amount: -cost,
         });
+        state.finances.cashBalance = (state.finances.cashBalance || 0) - cost;
       }
       ctx.toast(`Stock ${r.name} réapprovisionné (${fmtEur(cost)})`);
       ctx.save();
@@ -147,6 +148,7 @@ export function renderViewResources(container, ctx) {
         label: `Commande groupée (${count} lignes)`,
         amount: -totalCost,
       });
+      state.finances.cashBalance = (state.finances.cashBalance || 0) - totalCost;
     }
     ctx.toast(count ? `${count} stock(s) complété(s) pour ${fmtEur(totalCost)}` : "Aucun stock sous le seuil d'alerte !");
     ctx.save();

@@ -16,7 +16,7 @@ export function getCropById(cropId) {
 /**
  * Evalue la qualite agronomique d'une rotation sur une planche donnee.
  */
-export function evaluateRotation(plot, candidateCropId) {
+export function evaluateRotation(plot, candidateCropId, { includeCurrent = true } = {}) {
   const candidate = getCropById(candidateCropId);
   const hist = plot.history || [];
   const n1 = hist.find((h) => h.season === "N-1");
@@ -43,13 +43,13 @@ export function evaluateRotation(plot, candidateCropId) {
       score += 8;
       positives.push(`Synergie azote : ${prev.name} enrichit le sol pour ${candidate.name}.`);
     }
-    if (prev.nitrogenNeed === "Elevé" && candidate.nitrogenNeed === "Elevé" && label === "En cours/N-1") {
+    if (prev.nitrogenNeed === "Elevé" && candidate.nitrogenNeed === "Elevé" && (label === "Culture actuelle" || label === "N-1")) {
       score -= 10;
       warnings.push(`Succession de deux cultures exigeantes en azote : prévoir apport compost.`);
     }
   };
 
-  if (currentCrop) checkPrev(currentCrop.id, 30, "Culture actuelle");
+  if (includeCurrent && currentCrop) checkPrev(currentCrop.id, 30, "Culture actuelle");
   if (n1) checkPrev(n1.cropId, 24, "N-1");
   if (n2) checkPrev(n2.cropId, 12, "N-2");
 
@@ -110,10 +110,44 @@ function getDayWeatherFromModel(state, dayIndex, scenario) {
   };
 }
 
+function snapshotPlotsArray(plotSim) {
+  return plotSim.map((ps) => {
+    const progressPct = Math.min(100, Math.round((ps.gdd / ps.crop.gddTarget) * 100));
+    const stage =
+      progressPct < 15 ? "Semis / Levée" :
+      progressPct < 55 ? "Croissance" :
+      progressPct < 85 ? "Floraison / Grossissement" :
+      progressPct < 100 ? "Maturité / Récolte" : "Fin de cycle (Rotation)";
+    return {
+      id: ps.id,
+      name: ps.name,
+      cropId: ps.crop.id,
+      progressPct,
+      stage,
+      moisturePct: Math.round(ps.moisture),
+      healthPct: Math.round(ps.health),
+      diseaseRisk: Math.round(ps.diseaseRisk),
+      projectedHarvestKg: Math.round(ps.harvestedKgTotal),
+    };
+  });
+}
+
+export function getPlotSnapshotsForDay(forecast, dayOffset = 0) {
+  if (!forecast) return [];
+  const daily = forecast.daily || [];
+  if (daily.length > 0) {
+    const idx = Math.max(0, Math.min(daily.length - 1, Number(dayOffset) || 0));
+    if (Array.isArray(daily[idx]?.plotStates)) {
+      return daily[idx].plotStates;
+    }
+  }
+  return forecast.plotSnapshots || [];
+}
+
 /**
  * Simule la trajectoire agricole, hydrique, sanitaire, energetique et financiere jusqu'a +horizonDays.
  */
-export function simulateFuture(state, horizonDays = 30, scenarioId = "normal") {
+export function simulateFuture(state, horizonDays = 30, scenarioId = "normal", snapshotDay = 0) {
   const days = Math.max(1, Math.min(365, Number(horizonDays) || 30));
   const scenario = SCENARIOS.find((s) => s.id === scenarioId) || SCENARIOS[0];
 
@@ -206,35 +240,38 @@ export function simulateFuture(state, horizonDays = 30, scenarioId = "normal") {
       const effRain = inGreenhouse ? 0 : wx.rainMm;
       const effEtp = inGreenhouse ? wx.etpMm * 0.75 : wx.etpMm;
 
-      // Bilan hydrique journalier (simplifie en % reserve utile)
-      const waterLossPct = effEtp * c.kc * 2.1;
-      const rainGainPct = effRain * 1.8;
-      ps.moisture = Math.max(8, Math.min(96, ps.moisture + rainGainPct - waterLossPct));
+      if (d > 0) {
+        // Bilan hydrique journalier (simplifie en % reserve utile)
+        const waterLossPct = effEtp * c.kc * 2.1;
+        const rainGainPct = effRain * 1.8;
+        ps.moisture = Math.max(8, Math.min(96, ps.moisture + rainGainPct - waterLossPct));
 
-      // Declenchement irrigation auto si seuil < 38% et eau dispo
-      if (autoIrrigEnabled && ps.moisture < 38 && waterStock > 2) {
-        const neededM3 = Math.min(waterStock * 0.25, (ps.areaM2 * 4.5) / 1000);
-        irrigationUsedM3 += neededM3;
-        waterStock -= neededM3;
-        ps.moisture = Math.min(72, ps.moisture + 24);
+        // Declenchement irrigation auto si seuil < 38% et eau dispo
+        if (autoIrrigEnabled && ps.moisture < 38 && waterStock > 2) {
+          const neededM3 = Math.min(waterStock * 0.25, (ps.areaM2 * 4.5) / 1000);
+          irrigationUsedM3 += neededM3;
+          waterStock -= neededM3;
+          ps.moisture = Math.min(72, ps.moisture + 24);
+        }
+
+        // Croissance GDD
+        const gddToday = Math.max(0, effTemp - c.baseTemp) * (ps.moisture < 24 ? 0.55 : 1);
+        ps.gdd += gddToday;
+
+        // Risque maladie
+        const humidityTrigger = inGreenhouse ? Math.min(94, wx.rhAvgPct + 8) : wx.rhAvgPct;
+        let riskDelta = -4;
+        if (humidityTrigger >= 80 && effTemp >= 13 && effTemp <= 26) riskDelta += 11;
+        if (wx.tempMax >= 32) riskDelta += 5;
+        if (scenario.id === "growth_opt") riskDelta -= 4;
+        ps.diseaseRisk = Math.max(4, Math.min(96, ps.diseaseRisk + riskDelta));
+
+        // Sante
+        const stressPenalty = (ps.moisture < 25 ? 2.5 : 0) + (ps.diseaseRisk > 65 ? 1.8 : 0);
+        ps.health = Math.max(30, Math.min(100, ps.health + (stressPenalty === 0 ? 0.5 : -stressPenalty)));
       }
 
-      // Croissance GDD
-      const gddToday = Math.max(0, effTemp - c.baseTemp) * (ps.moisture < 24 ? 0.55 : 1);
-      ps.gdd += gddToday;
       const progress = ps.gdd / c.gddTarget;
-
-      // Risque maladie
-      const humidityTrigger = inGreenhouse ? Math.min(94, wx.rhAvgPct + 8) : wx.rhAvgPct;
-      let riskDelta = -4;
-      if (humidityTrigger >= 80 && effTemp >= 13 && effTemp <= 26) riskDelta += 11;
-      if (wx.tempMax >= 32) riskDelta += 5;
-      if (scenario.id === "growth_opt") riskDelta -= 4;
-      ps.diseaseRisk = Math.max(4, Math.min(96, ps.diseaseRisk + riskDelta));
-
-      // Sante
-      const stressPenalty = (ps.moisture < 25 ? 2.5 : 0) + (ps.diseaseRisk > 65 ? 1.8 : 0);
-      ps.health = Math.max(30, Math.min(100, ps.health + (stressPenalty === 0 ? 0.5 : -stressPenalty)));
 
       // Recolte etalee quand progress >= 0.85
       if (progress >= 0.85 && !ps.cycleDone) {
@@ -272,19 +309,22 @@ export function simulateFuture(state, horizonDays = 30, scenarioId = "normal") {
 
     for (const hd of herdFlocks) {
       animalWaterM3 += (hd.count * (hd.waterLitersPerDay || 50)) / 1000;
+      animalFeedKg += (hd.count * (hd.feedGramsPerDay || 3000) * (hd.speciesId === "porcin" ? 0.85 : 0.2)) / 1000;
       animalRevToday += hd.count * 2.4;
       laborHoursToday += Math.max(0.8, hd.count / 35);
     }
 
     // 4) Mise a jour stocks ressources
-    waterStock = Math.max(0, Math.min(waterMax, waterStock + rainHarvestM3 - irrigationUsedM3 - animalWaterM3 - 0.5));
-    feedStock = Math.max(0, feedStock - animalFeedKg);
-    seedStock = Math.max(0, seedStock - (seedRes?.dailyUse || 2));
-    agroStock = Math.max(0, agroStock - (agroRes?.dailyUse || 2.5));
-    fuelStock = Math.max(0, fuelStock - (fuelRes?.dailyUse || 4));
+    if (d > 0) {
+      waterStock = Math.max(0, Math.min(waterMax, waterStock + rainHarvestM3 - irrigationUsedM3 - animalWaterM3 - 0.5));
+      feedStock = Math.max(0, feedStock - animalFeedKg);
+      seedStock = Math.max(0, seedStock - (seedRes?.dailyUse || 2));
+      agroStock = Math.max(0, agroStock - (agroRes?.dailyUse || 2.5));
+      fuelStock = Math.max(0, fuelStock - (fuelRes?.dailyUse || 4));
+    }
 
     if (stockoutDays.water === null && waterStock <= 1) stockoutDays.water = d;
-    if (stockoutDays.feed === null && feedStock <= 1 && layingFlocks.length > 0) stockoutDays.feed = d;
+    if (stockoutDays.feed === null && feedStock <= 1 && state.livestock.length > 0) stockoutDays.feed = d;
     if (stockoutDays.seeds === null && seedStock <= 1) stockoutDays.seeds = d;
     if (stockoutDays.agro === null && agroStock <= 1) stockoutDays.agro = d;
     if (stockoutDays.fuel === null && fuelStock <= 1) stockoutDays.fuel = d;
@@ -300,7 +340,7 @@ export function simulateFuture(state, horizonDays = 30, scenarioId = "normal") {
     const staffCost = (totalStaffHoursPerDay * avgStaffHourlyCost + overtimeHours * avgStaffHourlyCost * 1.25) / 1.0;
     const revenueEur = Number((cropRevenueToday + animalRevToday).toFixed(0));
     const costEur = Number((fixedDailyCost + energyCost + varInputCost + staffCost * 0.35).toFixed(0));
-    cash += revenueEur - costEur;
+    if (d > 0) cash += revenueEur - costEur;
 
     const avgMoisturePct =
       plotSim.length > 0 ? Math.round(plotSim.reduce((a, p) => a + p.moisture, 0) / plotSim.length) : 60;
@@ -329,28 +369,12 @@ export function simulateFuture(state, horizonDays = 30, scenarioId = "normal") {
       humanHoursNeeded,
       robotHoursSaved,
       teamCapacityHours: Number(totalStaffHoursPerDay.toFixed(1)),
+      plotStates: snapshotPlotsArray(plotSim),
     });
   }
 
-  const plotSnapshots = plotSim.map((ps) => {
-    const progressPct = Math.min(100, Math.round((ps.gdd / ps.crop.gddTarget) * 100));
-    const stage =
-      progressPct < 15 ? "Semis / Levée" :
-      progressPct < 55 ? "Croissance" :
-      progressPct < 85 ? "Floraison / Grossissement" :
-      progressPct < 100 ? "Maturité / Récolte" : "Fin de cycle (Rotation)";
-    return {
-      id: ps.id,
-      name: ps.name,
-      cropId: ps.crop.id,
-      progressPct,
-      stage,
-      moisturePct: Math.round(ps.moisture),
-      healthPct: Math.round(ps.health),
-      diseaseRisk: Math.round(ps.diseaseRisk),
-      projectedHarvestKg: Math.round(ps.harvestedKgTotal),
-    };
-  });
+  const targetIdx = Math.max(0, Math.min(daily.length - 1, Number(snapshotDay) || 0));
+  const plotSnapshots = daily[targetIdx]?.plotStates || snapshotPlotsArray(plotSim);
 
   // Calcul Radar Autonomie & Trophees ludiques
   const lastDay = daily[daily.length - 1] || daily[0];
@@ -359,7 +383,7 @@ export function simulateFuture(state, horizonDays = 30, scenarioId = "normal") {
   const energyScore = Math.min(100, Math.round(energyRatio * 75));
   const avgRotScore =
     state.plots.length > 0
-      ? Math.round(state.plots.reduce((a, p) => a + evaluateRotation(p, p.cropId).score, 0) / state.plots.length)
+      ? Math.round(state.plots.reduce((a, p) => a + evaluateRotation(p, p.cropId, { includeCurrent: false }).score, 0) / state.plots.length)
       : 80;
   const welfareScore =
     state.livestock.length > 0

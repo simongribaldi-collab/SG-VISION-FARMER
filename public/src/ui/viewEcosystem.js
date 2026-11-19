@@ -187,7 +187,20 @@ export function renderViewEcosystem(container, ctx) {
       const loc = CLIMATE_LOCATIONS.find((l) => l.id === btn.dataset.locPreset);
       if (!loc) return;
       state.farm.location = { id: loc.id, name: loc.name, lat: loc.lat, lon: loc.lon, climate: loc.climate };
-      state.weather.forecast = buildSyntheticForecast(loc.id, 14);
+      const fc = buildSyntheticForecast(loc.id, 14);
+      state.weather.source = "Station Locale + Modèle Climatique";
+      state.weather.forecast = fc;
+      if (fc[0]) {
+        state.weather.current = {
+          tempC: Number((fc[0].tempMax - 1.5).toFixed(1)),
+          rhPct: fc[0].rhAvgPct,
+          windKmh: fc[0].windMaxKmh,
+          rainMm: fc[0].rainMm,
+          solarWm2: Math.round(fc[0].solarKwhM2 * 145),
+          leafWetnessPct: fc[0].rhAvgPct > 78 ? 65 : 22,
+          pressureHpa: 1016,
+        };
+      }
       ctx.toast(`Climat basculé sur ${loc.name}`);
       ctx.save();
       ctx.rerender();
@@ -256,6 +269,7 @@ export function renderViewEcosystem(container, ctx) {
       provider: fd.get("provider"),
       ollamaUrl: fd.get("ollamaUrl"),
       model: fd.get("model"),
+      apiKey: state.aiSettings?.apiKey || "",
     };
     ctx.toast("Configuration IA enregistrée !");
     ctx.save();
